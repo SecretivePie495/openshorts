@@ -58,6 +58,23 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     const [freePos, setFreePos] = useState(prefs.freePos || null);
     const previewRef = useRef(null);
     const draggingRef = useRef(false);
+    const look = HOOK_STYLES.find((st) => st.value === style) || HOOK_STYLES[0];
+    // The preview must show the CHOSEN look — the old hardcoded white card
+    // made toggling style and starting a drag both "change the format", so
+    // the picker felt broken. Outline looks lose the card entirely.
+    const previewCard = {
+        ...getSizeStyle(),
+        backgroundColor: look.box,
+        color: look.text,
+        fontFamily: 'Noto Serif, serif',
+        fontWeight: 700,
+        textShadow: look.outline
+            ? '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000'
+            : 'none',
+        boxShadow: look.outline ? 'none' : '0 4px 15px rgba(0,0,0,0.5)',
+        borderRadius: look.outline ? 0 : '12px',
+        padding: look.outline ? '0' : '10px 12px',
+    };
 
     if (!isOpen) return null;
 
@@ -135,17 +152,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                                     style={{ left: `${freePos.x * 100}%`, top: `${freePos.y * 100}%`, transform: 'translate(-50%, -50%)' }}
                                 >
                                     <div
-                                        className="text-black font-bold px-3 py-2 rounded-xl shadow-2xl text-center whitespace-pre-wrap transition-all duration-200"
-                                        style={{
-                                            ...getSizeStyle(),
-                                            backgroundColor: 'rgba(255, 255, 255, 0.82)',
-                                            fontFamily: 'Noto Serif, serif',
-                                            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-                                            paddingTop: '10px',
-                                            paddingBottom: '10px',
-                                            paddingLeft: '12px',
-                                            paddingRight: '12px'
-                                        }}
+                                        className="text-center whitespace-pre-wrap"
+                                        style={previewCard}
                                     >
                                         {text || "Enter your text..."}
                                     </div>
@@ -153,17 +161,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                             ) : (
                                 <div className={`absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col h-full ${getPositionClass()}`}>
                                     <div
-                                        className="text-black font-bold px-3 py-2 rounded-xl shadow-2xl text-center whitespace-pre-wrap transition-all duration-200"
-                                        style={{
-                                            ...getSizeStyle(),
-                                            backgroundColor: 'rgba(255, 255, 255, 0.82)',
-                                            fontFamily: 'Noto Serif, serif',
-                                            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-                                            paddingTop: '10px',
-                                            paddingBottom: '10px',
-                                            paddingLeft: '12px',
-                                            paddingRight: '12px'
-                                        }}
+                                        className="text-center whitespace-pre-wrap"
+                                        style={previewCard}
                                     >
                                         {text || "Enter your text..."}
                                     </div>

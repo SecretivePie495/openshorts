@@ -116,16 +116,22 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
     });
   }
 
-  const positionStyle: React.CSSProperties =
-    config.xPct != null && config.yPct != null
-      ? {
-          left: `${config.xPct * 100}%`,
-          top: `${config.yPct * 100}%`,
-          right: "auto",
-          bottom: "auto",
-          transform: "translate(-50%, -50%)",
-        }
-      : POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
+  // Free position must NOT also carry the preset frame (left:0/right:0 +
+  // flex centering): a full-width box translated -50% jumps half off-screen
+  // the instant a drag starts — users read that as "dragging changes the
+  // format". The anchored point is the box CENTER, matching hooks.py's
+  // overlay math (x*W - box_w/2) and the DOM fallback preview.
+  const free = config.xPct != null && config.yPct != null;
+  const positionStyle: React.CSSProperties = free
+    ? {
+        left: `${config.xPct! * 100}%`,
+        top: `${config.yPct! * 100}%`,
+        right: "auto",
+        bottom: "auto",
+        width: "auto",
+        transform: "translate(-50%, -50%)",
+      }
+    : POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
   const look = HOOK_LOOKS[config.style ?? "classic"] ?? HOOK_LOOKS.classic;
 
   // Base font size: 5% of 1080 width (matches hooks.py logic)
@@ -137,8 +143,7 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
     <div
       style={{
         position: "absolute",
-        left: 0,
-        right: 0,
+        ...(free ? {} : { left: 0, right: 0 }),
         display: "flex",
         justifyContent: "center",
         ...positionStyle,
