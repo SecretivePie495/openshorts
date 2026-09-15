@@ -14,7 +14,7 @@ export default function MediaInput({ onProcess, isProcessing }) {
     const [url, setUrl] = useState('');
     const [file, setFile] = useState(null);
     const [acknowledged, setAcknowledged] = useState(false);
-    const [outputFormat, setOutputFormat] = useState('vertical'); // vertical | horizontal | square
+    const [outputFormat, setOutputFormat] = useState('vertical'); // vertical | horizontal | square | letterbox
     const [showInfo, setShowInfo] = useState(false);
     // Advanced generation controls — empty string means "let the AI decide",
     // which keeps the default pipeline behavior untouched.
@@ -211,11 +211,12 @@ export default function MediaInput({ onProcess, isProcessing }) {
                 {/* Output format selector */}
                 <div className="mt-5" data-tutorial="output-format">
                     <p className="eyebrow mb-2">Output format</p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         {[
                             { value: 'vertical', label: '9:16', hint: 'Shorts · Reels · TikTok', w: 18, h: 32 },
                             { value: 'square', label: '1:1', hint: 'Feed posts', w: 28, h: 28 },
                             { value: 'horizontal', label: '16:9', hint: 'Keep landscape · YouTube', w: 36, h: 20 },
+                            { value: 'letterbox', label: 'Boxed', hint: '16:9 kept · black bars', w: 18, h: 32 },
                         ].map((f) => {
                             const active = outputFormat === f.value;
                             return (

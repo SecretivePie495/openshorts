@@ -982,6 +982,27 @@ def finalize_clip_passthrough(input_video, final_output_video):
     return True
 
 
+def finalize_clip_letterbox(input_video, final_output_video, canvas_width=1080, canvas_height=1920):
+    """Fit the clip's native 16:9 frame into a 9:16 canvas with black bars.
+
+    No crop, no subject tracking — the whole point is that nothing is thrown
+    away. Scale-to-fit-width then pad, same canvas size vertical delivers.
+    """
+    if os.path.exists(final_output_video):
+        os.remove(final_output_video)
+    print(f"🎬 Letterbox ({canvas_width}x{canvas_height} canvas): {input_video}")
+    vf = (f"scale={canvas_width}:-2:force_original_aspect_ratio=decrease,"
+          f"pad={canvas_width}:{canvas_height}:(ow-iw)/2:(oh-ih)/2:black")
+    cmd = [
+        'ffmpeg', '-y', '-i', input_video, '-vf', vf,
+        *video_encode_args(QUALITY), '-c:a', 'copy', *METADATA_SCRUB,
+        '-movflags', '+faststart', final_output_video,
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1800)
+    print(f"✅ Clip saved to {final_output_video}")
+    return True
+
+
 def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=None):
     """Burn the default caption style onto a finished clip.
 
@@ -1108,13 +1129,16 @@ def auto_hook_clip(clip_path, clip):
 def render_clip(input_video, final_output_video, output_format="auto",
                 force_strategy=None, crop_overrides=None):
     """Route a cut clip through the right renderer for the chosen output format.
-    vertical/auto -> 9:16 reframe, square -> 1:1 reframe, horizontal -> keep.
+    vertical/auto -> 9:16 reframe, square -> 1:1 reframe, horizontal -> keep,
+    letterbox -> 9:16 canvas with the native frame boxed in black bars.
     ``force_strategy`` (e.g. 'WIDE'/'TRACK') pins every scene's layout — the
     clip editor's whole-clip framing override. ``crop_overrides`` positions
     individual scenes by hand (the per-scene reframing editor) and wins over
     ``force_strategy`` for the scenes it names."""
     if output_format == "horizontal":
         return finalize_clip_passthrough(input_video, final_output_video)
+    if output_format == "letterbox":
+        return finalize_clip_letterbox(input_video, final_output_video)
     aspect = 1.0 if output_format == "square" else ASPECT_RATIO
     return process_video_to_vertical(input_video, final_output_video, aspect_ratio=aspect,
                                      force_strategy=force_strategy,
@@ -1821,8 +1845,10 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output', type=str, help="Output directory or file (if processing whole video).")
     parser.add_argument('--keep-original', action='store_true', help="Keep the downloaded YouTube video.")
     parser.add_argument('--skip-analysis', action='store_true', help="Skip AI analysis and convert the whole video.")
-    parser.add_argument('--format', type=str, default="auto", choices=["auto", "vertical", "horizontal", "square"],
-                        help="Output aspect: vertical/auto (9:16), horizontal (keep 16:9), square (1:1).")
+    parser.add_argument('--format', type=str, default="auto",
+                        choices=["auto", "vertical", "horizontal", "square", "letterbox"],
+                        help="Output aspect: vertical/auto (9:16), horizontal (keep 16:9), "
+                             "square (1:1), letterbox (16:9 boxed into 9:16 with black bars).")
     parser.add_argument('--transcript', type=str,
                         help="Path to a precomputed transcript JSON (transcribe_media shape); skips transcription.")
 

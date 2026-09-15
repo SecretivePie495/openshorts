@@ -2278,7 +2278,7 @@ async def process_endpoint(
         upload_id = body.get("upload_id")
 
     # Normalize output format (auto = keep pipeline default).
-    if output_format not in ("vertical", "horizontal", "square"):
+    if output_format not in ("vertical", "horizontal", "square", "letterbox"):
         output_format = "auto"
 
     # Accepts a JSON list or a comma-separated form field.
@@ -3632,10 +3632,10 @@ async def get_clip_scenes(job_id: str, clip_index: int, request: Request):
     if clip_index < 0 or clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
 
-    if data.get('output_format') == 'horizontal':
+    if data.get('output_format') in ('horizontal', 'letterbox'):
         raise HTTPException(
             status_code=400,
-            detail="Horizontal clips keep the full frame; there is no crop to reframe.")
+            detail="Horizontal and letterboxed clips keep the full frame; there is no crop to reframe.")
 
     clip = clips[clip_index]
     segments, _canonical_range = _clip_recipe_parts(clip)
@@ -3822,10 +3822,10 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
         raise HTTPException(status_code=404, detail="Clip not found")
     clip = clips[req.clip_index]
 
-    if data.get('output_format') == 'horizontal':
+    if data.get('output_format') in ('horizontal', 'letterbox'):
         raise HTTPException(
             status_code=400,
-            detail="Horizontal clips keep the full frame; there is no crop to reframe.")
+            detail="Horizontal and letterboxed clips keep the full frame; there is no crop to reframe.")
 
     segments, canonical_range = _clip_recipe_parts(clip)
     source_path = _locate_source(req.job_id)
