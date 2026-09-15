@@ -1685,27 +1685,32 @@ function TimeInput({ value, onCommit, disabled, label }) {
         }
     };
     return (
-        <input
-            type="number"
-            step="0.1"
-            value={shown}
-            disabled={disabled}
-            aria-label={label}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-                if (e.key === 'Enter') { commit(); e.target.blur(); }
-                if (e.key === 'Escape') setDraft(null);
-                // Native step buttons only fire onChange; keep them instant.
-                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                    if (draft === null) {
-                        e.preventDefault();
-                        onCommit(Math.round((value + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 1000) / 1000);
+        <div className="flex flex-col items-center leading-none">
+            <input
+                type="number"
+                step="0.1"
+                value={shown}
+                disabled={disabled}
+                aria-label={label}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') { commit(); e.target.blur(); }
+                    if (e.key === 'Escape') setDraft(null);
+                    // Native step buttons only fire onChange; keep them instant.
+                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                        if (draft === null) {
+                            e.preventDefault();
+                            onCommit(Math.round((value + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 1000) / 1000);
+                        }
                     }
-                }
-            }}
-            className="input-field w-20 py-1 px-1.5 text-xs text-center disabled:opacity-40"
-        />
+                }}
+                className="input-field w-20 py-1 px-1.5 text-xs text-center disabled:opacity-40"
+            />
+            {/* Raw seconds are what the input edits, but nobody thinks in "84.16s" —
+                show the mm:ss everyone actually reads, right under the field it edits. */}
+            <span className="text-[9px] text-muted mt-0.5 tabular-nums" aria-hidden="true">{fmt(shown)}</span>
+        </div>
     );
 }
 

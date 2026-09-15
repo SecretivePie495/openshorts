@@ -14,6 +14,15 @@ import { renderInBrowser } from '../lib/renderInBrowser';
 
 const QUIET_BTN = 'group flex flex-col items-center justify-center gap-1 py-2.5 sm:py-2 px-1 rounded-input border border-rule hover:bg-paper3 text-[11px] lowercase text-ink2 whitespace-nowrap transition-colors disabled:opacity-45 disabled:cursor-not-allowed';
 
+// "auto edit" is the one action button here that fires an AI (Gemini) pass
+// immediately on click, no options modal first — everything else (subtitles,
+// viral hook, dub voice) opens a modal before running. That made it a single
+// misclick away from a real, metered API call, so it gets one confirm, skippable.
+const AUTO_EDIT_CONFIRM_KEY = 'os_autoedit_confirm_dismissed';
+const autoEditConfirmDismissed = () => {
+    try { return localStorage.getItem(AUTO_EDIT_CONFIRM_KEY) === '1'; } catch { return false; }
+};
+
 const PLATFORM_OPTIONS = [
     { value: 'tiktok', label: 'tiktok', icon: <Video size={16} /> },
     { value: 'instagram', label: 'instagram', icon: <Instagram size={16} /> },
@@ -41,6 +50,8 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [showDescModal, setShowDescModal] = useState(false);
     const [showSubtitleModal, setShowSubtitleModal] = useState(false);
     const [showWatermarkModal, setShowWatermarkModal] = useState(false);
+    const [showAutoEditConfirm, setShowAutoEditConfirm] = useState(false);
+    const [dontConfirmAutoEdit, setDontConfirmAutoEdit] = useState(false);
     const { plan } = useAuth();
     const videoRef = React.useRef(null);
     // Pristine base clip (no burned subtitles/hook), stable regardless of how
@@ -896,7 +907,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     )}
 
                     <button
-                        onClick={handleAutoEdit}
+                        onClick={() => autoEditConfirmDismissed() ? handleAutoEdit() : setShowAutoEditConfirm(true)}
                         disabled={isEditing}
                         className={QUIET_BTN}
                     >
@@ -955,6 +966,49 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     </button>
                 </div>
             </div>
+
+            {/* Auto Edit Confirm Modal */}
+            <Modal
+                isOpen={showAutoEditConfirm}
+                onClose={() => setShowAutoEditConfirm(false)}
+                eyebrow="AI PASS"
+                title="run auto edit?"
+                size="sm"
+                footer={
+                    <div className="flex flex-col gap-3">
+                        <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={dontConfirmAutoEdit}
+                                onChange={(e) => setDontConfirmAutoEdit(e.target.checked)}
+                                className="accent-brass"
+                            />
+                            don't ask again
+                        </label>
+                        <div className="flex items-center gap-2 justify-end">
+                            <button onClick={() => setShowAutoEditConfirm(false)} className="btn-ghost px-4 py-2 text-sm">
+                                cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (dontConfirmAutoEdit) {
+                                        try { localStorage.setItem(AUTO_EDIT_CONFIRM_KEY, '1'); } catch { /* ignore */ }
+                                    }
+                                    setShowAutoEditConfirm(false);
+                                    handleAutoEdit();
+                                }}
+                                className="btn-primary px-4 py-2 text-sm"
+                            >
+                                run auto edit
+                            </button>
+                        </div>
+                    </div>
+                }
+            >
+                <p className="text-muted text-sm">
+                    Sends this clip to Gemini to pick zooms and cuts, then re-renders it. Uses your API quota each time you run it.
+                </p>
+            </Modal>
 
             {/* Descriptions Modal */}
             <Modal
