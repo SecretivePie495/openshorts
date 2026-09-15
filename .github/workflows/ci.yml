@@ -20,11 +20,15 @@ jobs:
       # the tests exercise the gated-off paths. numpy+opencv cover the layout
       # modules, fastapi/boto3/PyJWT/python-multipart cover importing app.py
       # for the MCP endpoint tests, google-genai covers gemini_worker.
+      # scenedetect+yt-dlp are pip-light and are the only things gating
+      # main.py's import — without them every main.py test silently skipped
+      # in CI (unlocked 15-sep-2026: the download-plan and Gemini-retry
+      # tests had never run there).
       - name: Install test dependencies
         run: >
           pip install pytest pillow httpx pydantic sqlalchemy numpy
           opencv-python-headless python-dotenv google-genai fastapi boto3
-          PyJWT email-validator python-multipart
+          PyJWT email-validator python-multipart scenedetect yt-dlp
       - name: Run tests
         run: pytest tests/ -v
 

@@ -1528,7 +1528,13 @@ def _run_gemini_stage(client, model_name, prompt, schema):
         response_mime_type="application/json",
         response_schema=schema,
     )
-    max_attempts = 3
+    # Google's own 503 "high demand" is a capacity spike measured in MINUTES
+    # (prod 15-sep-2026: a scoring call died after 3 tries spread over 15s,
+    # while the same job minutes later — the spike over — needed nothing).
+    # Six attempts with full jitter, capped at 90s, cover ~7 min: the longest
+    # realistic spike. The budget is per CALL; 16 windows x 6 dead attempts
+    # was never the risk, the risk was the opposite (one spike, whole job).
+    max_attempts = int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
     for attempt in range(1, max_attempts + 1):
         try:
             if use_local:
@@ -1564,9 +1570,12 @@ def _run_gemini_stage(client, model_name, prompt, schema):
                 'validation error'))
             if attempt == max_attempts or not transient:
                 raise
-            wait = 5 * (2 ** (attempt - 1))
+            # Full jitter (uniform 0..capped backoff): MAX_CONCURRENT_JOBS
+            # workers failing in the same spike must not wake in lockstep.
+            import random as _rj
+            wait = _rj.uniform(0, min(90, 5 * (2 ** (attempt - 1))))
             who = "LLM server" if use_local else "Gemini"
-            print(f"⚠️ {who} transient error (attempt {attempt}/{max_attempts}), retrying in {wait}s: {msg[:150]}")
+            print(f"⚠️ {who} transient error (attempt {attempt}/{max_attempts}), retrying in {wait:.0f}s: {msg[:150]}")
             time.sleep(wait)
 
 
