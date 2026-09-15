@@ -481,9 +481,28 @@ def _model_chain(primary: str):
     return chain
 
 
+# A model that burned its whole budget is QUOTA-jammed, not briefly unlucky:
+# 10+ calls/job would each repeat the dance. It gets a cooldown instead; when
+# every family is cooling, we wait the shortest remaining time rather than
+# hammer. Prod 15-sep-2026: 3.1-flash-lite pinned at 6/15 RPM while
+# 3.5-flash-lite sat at zero — one jammed model must never stall a job.
+_MODEL_COOLDOWN_S = int(os.environ.get("GEMINI_MODEL_COOLDOWN_S", "600"))
+_model_block_until: dict = {}
+
+
+def _cooling(model, now):
+    until = _model_block_until.get(model, 0)
+    return until - now if until > now else 0
+
+
+def _available_chain(chain, now):
+    live = [m for m in chain if not _cooling(m, now)]
+    return live or chain  # all cooling: shortest-remaining-first below
+
+
 def generate_with_capacity_chain(client, model_name, *, contents, config=None,
                                  where="", budget=None, validate=None,
-                                 sleep=time.sleep):
+                                 sleep=time.sleep, now=time.monotonic):
     """``client.models.generate_content`` + the full 503 survival kit.
 
     GEMINI_STAGE_RETRIES attempts (default 6) with full jitter capped at 90s
@@ -501,9 +520,16 @@ def generate_with_capacity_chain(client, model_name, *, contents, config=None,
     — the cost row must name the model that ANSWERED, not the one asked.
     """
     attempts = budget or int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
-    chain = _model_chain(model_name)
-    for ci, model in enumerate(chain):
-        last = None
+    chain = _available_chain(_model_chain(model_name), now())
+    last = None
+    if all(_cooling(m, now()) for m in chain):
+        # Everyone is cooling: wait ONLY the shortest remaining cooldown and
+        # re-derive the chain — the first model back in service goes first.
+        wait = min(_cooling(m, now()) for m in chain)
+        _log(f"⏳ All Gemini families cooling; waiting {wait:.0f}s for the first back")
+        sleep(wait)
+        chain = [m for m in chain if not _cooling(m, now())] or chain
+    for model in chain:
         for attempt in range(1, attempts + 1):
             try:
                 response = client.models.generate_content(
@@ -523,12 +549,13 @@ def generate_with_capacity_chain(client, model_name, *, contents, config=None,
                          f"(model={model}, attempt {attempt}/{attempts}), "
                          f"retrying in {wait:.0f}s: {msg[:150]}")
                     sleep(wait)
-        if ci < len(chain) - 1:
-            _log(f"♻️ Gemini {model} out of capacity after {attempts} tries"
-                 f"{f' [{where}]' if where else ''}; falling through to {chain[ci + 1]}: "
-                 f"{str(last)[:120]}")
-        else:
-            raise last
+        _model_block_until[model] = now() + _MODEL_COOLDOWN_S
+        nxt = [m for m in chain if m != model]
+        _log(f"♻️ Gemini {model} out of capacity after {attempts} tries"
+             f"{f' [{where}]' if where else ''}; cooling it for "
+             f"{_MODEL_COOLDOWN_S // 60} min" +
+             (f", falling through to {nxt[0]}" if nxt else "") + f": {str(last)[:120]}")
+    raise last
 
 
 def _get_response_text(response) -> str:

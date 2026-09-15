@@ -1500,6 +1500,30 @@ def clear_transcript_checkpoint(output_dir):
         print(f"⚠️ Could not remove transcript checkpoint: {e}")
 
 
+def _run_stage(name, fn, timeout_min):
+    """Run a whole-pipeline stage under a wall-clock watchdog.
+
+    Every other long step already dies with ffmpeg's own timeout; these do
+    their work IN-process — a faster-whisper CUDA/model-load wedge and a
+    stalled YouTube download have hung jobs silently forever (a spinning
+    dashboard, no error, no refund path). A timed-out stage aborts the job
+    with the stage NAMED; the abandoned worker thread dies with the process.
+    timeout_min <= 0 disables the watchdog."""
+    limit = float(timeout_min) * 60
+    if limit <= 0:
+        return fn()
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FTimeout
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"stage:{name}") as ex:
+        fut = ex.submit(fn)
+        try:
+            return fut.result(timeout=limit)
+        except _FTimeout:
+            raise RuntimeError(
+                f"{name} exceeded its {timeout_min:.0f}-minute limit and was aborted. "
+                "The job stops here so the failure is visible instead of an "
+                "endless spinner; the queue will take the next job.")
+
+
 def transcribe_video(video_path):
     print("🎙️  Transcribing video...")
     from transcribe_backends import transcribe_media
@@ -1898,7 +1922,9 @@ if __name__ == '__main__':
             else:
                 output_dir = "."
         
-        input_video, video_title = download_youtube_video(args.url, output_dir)
+        input_video, video_title = _run_stage(
+            'Download', lambda: download_youtube_video(args.url, output_dir),
+            float(os.environ.get("STAGE_TIMEOUT_DOWNLOAD_MIN", "60")))
     else:
         input_video = args.input
         video_title = os.path.splitext(os.path.basename(input_video))[0]
@@ -1986,7 +2012,9 @@ if __name__ == '__main__':
                       f"({len(transcript['segments'])} segments) — skipping transcription.")
         if transcript is None:
             try:
-                transcript = transcribe_video(input_video)
+                transcript = _run_stage(
+                    'Transcription', lambda: transcribe_video(input_video),
+                    float(os.environ.get("STAGE_TIMEOUT_TRANSCRIBE_MIN", "45")))
                 save_transcript_checkpoint(output_dir, transcript, input_video, duration)
             except NoAudioError as e:
                 print(f"🔇 {e} — switching to visual analysis.")

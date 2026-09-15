@@ -24,7 +24,12 @@ import pytest
 
 import gemini_worker
 
-NETSCAPE_ENV_OFF = ""  # GEMINI_MODEL_FALLBACKS='' semantics, used below
+
+@pytest.fixture(autouse=True)
+def _clear_cooldowns():
+    gemini_worker._model_block_until.clear()
+    yield
+    gemini_worker._model_block_until.clear()
 
 
 def _client(raises, log=None):
@@ -89,6 +94,68 @@ class TestChain:
             client, "gemini-x", contents="p", sleep=sleep)
         assert winner == "gemini-sibling"
         assert state["models"] == ["gemini-x", "gemini-x", "gemini-sibling"]
+
+    def test_a_burnt_model_is_cooled_not_retried(self, monkeypatch):
+        """Call 2 of the same job must go STRAIGHT to the sibling: 15+ calls
+        each eating the full budget is exactly the 'never finishes' failure."""
+        monkeypatch.setenv("GEMINI_STAGE_RETRIES", "2")
+        monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "gemini-sibling")
+        dead = {"gemini-x"}
+        client, state, sleep = _client(_boom(0, dead))
+        fake = {"t": 0.0}
+        out, winner = gemini_worker.generate_with_capacity_chain(
+            client, "gemini-x", contents="p", sleep=sleep,
+            now=lambda: fake["t"])
+        assert winner == "gemini-sibling"
+        assert state["models"] == ["gemini-x", "gemini-x", "gemini-sibling"]
+        # Second call: no budget burned on the cooled primary.
+        fake["t"] += 1.0
+        state["models"].clear()
+        out, winner = gemini_worker.generate_with_capacity_chain(
+            client, "gemini-x", contents="p", sleep=sleep,
+            now=lambda: fake["t"])
+        assert winner == "gemini-sibling"
+        assert state["models"] == ["gemini-sibling"]
+
+    def test_all_cooling_waits_the_shortest_then_answers(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_STAGE_RETRIES", "1")
+        monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "gemini-sibling")
+        client, state, sleep = _client(lambda n, m: None)
+        fake = {"t": 0.0}
+        gemini_worker._model_block_until["gemini-x"] = 30.0
+        gemini_worker._model_block_until["gemini-sibling"] = 10.0
+
+        def clk_sleep(s):
+            state["slept"].append(s)
+            fake["t"] += s  # the clock advances as waiting happens
+
+        out, winner = gemini_worker.generate_with_capacity_chain(
+            client, "gemini-x", contents="p", sleep=clk_sleep,
+            now=lambda: fake["t"])
+        # Sleeps ONLY the shortest remaining wait (sibling, 10s) and tries it
+        # first — no point waiting 30s for x when the sibling is back at 10.
+        assert winner == "gemini-sibling"
+        assert state["slept"] == [10.0]
+        assert state["models"] == ["gemini-sibling"]
+
+    def test_cooldown_expires(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_STAGE_RETRIES", "1")
+        monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "")
+        client, state, sleep = _client(
+            lambda n, m: RuntimeError("503 UNAVAILABLE"))
+        fake = {"t": 0.0}
+        with pytest.raises(RuntimeError):
+            gemini_worker.generate_with_capacity_chain(
+                client, "gemini-x", contents="p", sleep=sleep,
+                now=lambda: fake["t"])
+        fake["t"] = gemini_worker._MODEL_COOLDOWN_S + 1
+        state["models"].clear()
+        with pytest.raises(RuntimeError):
+            gemini_worker.generate_with_capacity_chain(
+                client, "gemini-x", contents="p", sleep=sleep,
+                now=lambda: fake["t"])
+        assert state["models"]  # retried again after the cooldown
+
 
     def test_default_chain_for_the_pipeline_model(self, monkeypatch):
         """3.1-flash-lite -> 3.5-flash-lite -> 2.5-flash-lite (quota pools
@@ -199,3 +266,31 @@ def test_stage_wiring_keeps_cost_and_parse_contract(monkeypatch):
         # The cost row names the model that ANSWERED, on the raw response.
         assert costs["args"][1] == "gemini-3.1-flash-lite"
         assert costs["args"][0] is not None
+
+
+class TestStageWatchdog:
+    """A wedged in-process stage must end the job with the stage NAMED."""
+
+    def _main(self):
+        with _import_main_with_stubs() as m:
+            return m
+
+    def test_a_hung_stage_raises_after_the_limit(self):
+        m = self._main()
+        started = []
+
+        def hang():
+            started.append(True)
+            time.sleep(30)
+
+        with pytest.raises(RuntimeError, match="Transcription exceeded its"):
+            m._run_stage("Transcription", hang, timeout_min=1.0 / 60.0)
+        assert started == [True]
+
+    def test_a_fast_stage_returns_its_value(self):
+        m = self._main()
+        assert m._run_stage("Download", lambda: ("path", "title"), 1) == ("path", "title")
+
+    def test_zero_disables_the_watchdog(self):
+        m = self._main()
+        assert m._run_stage("Transcription", lambda: 42, 0) == 42
