@@ -3,8 +3,10 @@
 Prod 15-sep-2026: a scoring call died after 3 attempts spread over 15s while
 Google's own "high demand" 503 lasted minutes; resubmitting the same job once
 the spike passed needed no code change. The policy now defaults to 6 attempts
-with full jitter, capped at 90s (~7 min of coverage), tunable per deployment
-with GEMINI_STAGE_RETRIES.
+with full jitter, capped at 90s (~7 min of coverage, GEMINI_STAGE_RETRIES),
+and when even that runs out the call rides a sibling-model chain
+(GEMINI_MODEL_FALLBACKS, default <primary>-latest then gemini-2.5-flash-lite)
+instead of failing the job for a model-side traffic jam.
 
 ``main`` imports the ML stack at module level (mediapipe, ultralytics, torch,
 scenedetect). Neither CI's slim env nor a bare dev box has it, and stubbing it
@@ -43,12 +45,14 @@ def _import_main_with_stubs():
 
 
 def _client(raises):
-    """raises(n) -> the exception attempt n (1-based) should see, or None."""
-    state = {"n": 0}
+    """raises(n, model) -> the exception attempt n (1-based) should see, or
+    None. Records every (model, attempt) pair it was asked about."""
+    state = {"n": 0, "models": []}
 
     def generate_content(model=None, contents=None, config=None):
         state["n"] += 1
-        err = raises(state["n"])
+        state["models"].append(model)
+        err = raises(state["n"], model)
         if err is not None:
             raise err
         return types.SimpleNamespace(parsed=None)
@@ -65,13 +69,19 @@ def _quiet_helpers(main, monkeypatch):
                         lambda r, m: None)
 
 
+def _no_fallbacks(monkeypatch):
+    # The chain is off: these tests assert the single-model policy.
+    monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "")
+
+
 def test_a_four_attempt_spike_no_longer_kills_the_job(monkeypatch):
     with _import_main_with_stubs() as main:
         _quiet_helpers(main, monkeypatch)
+        _no_fallbacks(monkeypatch)
     slept = []
     monkeypatch.setattr(main.time, "sleep", lambda s: slept.append(s))
     client, state = _client(
-        lambda n: RuntimeError("503 UNAVAILABLE high demand") if n <= 4 else None)
+        lambda n, m: RuntimeError("503 UNAVAILABLE high demand") if n <= 4 else None)
 
     parsed, cost = main._run_gemini_stage(client, "gemini-test", "prompt", dict)
     assert parsed == {"clips": []}
@@ -82,23 +92,69 @@ def test_a_four_attempt_spike_no_longer_kills_the_job(monkeypatch):
 
 def test_budget_is_configurable(monkeypatch):
     with _import_main_with_stubs() as main:
-        pass
+        _no_fallbacks(monkeypatch)
     monkeypatch.setenv("GEMINI_STAGE_RETRIES", "2")
     slept = []
     monkeypatch.setattr(main.time, "sleep", lambda s: slept.append(s))
-    client, state = _client(lambda n: RuntimeError("503 UNAVAILABLE high demand"))
+    client, state = _client(lambda n, m: RuntimeError("503 UNAVAILABLE high demand"))
     with pytest.raises(RuntimeError):
         main._run_gemini_stage(client, "gemini-test", "prompt", dict)
     assert state["n"] == 2
     assert len(slept) == 1
 
 
+def test_a_spike_past_the_budget_rides_the_fallback_chain(monkeypatch):
+    with _import_main_with_stubs() as main:
+        _quiet_helpers(main, monkeypatch)
+    monkeypatch.setenv("GEMINI_STAGE_RETRIES", "2")
+    monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "gemini-sibling")
+    slept = []
+    monkeypatch.setattr(main.time, "sleep", lambda s: slept.append(s))
+    # Primary dead forever; the sibling answers on its first try.
+    client, state = _client(
+        lambda n, m: None if m == "gemini-sibling"
+        else RuntimeError("503 UNAVAILABLE high demand"))
+
+    parsed, cost = main._run_gemini_stage(client, "gemini-primary", "prompt", dict)
+    assert parsed == {"clips": []}
+    assert state["models"] == ["gemini-primary", "gemini-primary", "gemini-sibling"]
+
+
+def test_default_chain_appends_latest_alias(monkeypatch):
+    with _import_main_with_stubs() as main:
+        _quiet_helpers(main, monkeypatch)
+    monkeypatch.delenv("GEMINI_MODEL_FALLBACKS", raising=False)
+    monkeypatch.setenv("GEMINI_STAGE_RETRIES", "1")
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    client, state = _client(
+        lambda n, m: None if m == "gemini-3.1-flash-lite-latest"
+        else RuntimeError("503 UNAVAILABLE high demand"))
+    parsed, _ = main._run_gemini_stage(
+        client, "gemini-3.1-flash-lite", "prompt", dict)
+    assert parsed == {"clips": []}
+    assert state["models"] == ["gemini-3.1-flash-lite",
+                               "gemini-3.1-flash-lite-latest"]
+
+
+def test_hard_failures_never_switch_models(monkeypatch):
+    with _import_main_with_stubs() as main:
+        _no_fallbacks(monkeypatch)
+    monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "gemini-sibling")
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    client, state = _client(
+        lambda n, m: RuntimeError("400 INVALID_ARGUMENT bad schema"))
+    with pytest.raises(RuntimeError):
+        main._run_gemini_stage(client, "gemini-primary", "prompt", dict)
+    assert state["models"] == ["gemini-primary"]
+
+
 def test_policy_blocks_never_retry(monkeypatch):
     with _import_main_with_stubs() as main:
+        _no_fallbacks(monkeypatch)
         monkeypatch.setattr(main.gemini_worker, "raise_if_blocked",
                             MagicMock(side_effect=main.gemini_worker.GeminiBlockedError("blocked")))
     monkeypatch.setattr(main.time, "sleep", lambda s: None)
-    client, state = _client(lambda n: None)
+    client, state = _client(lambda n, m: None)
     with pytest.raises(main.gemini_worker.GeminiBlockedError):
         main._run_gemini_stage(client, "gemini-test", "prompt", dict)
     assert state["n"] == 1

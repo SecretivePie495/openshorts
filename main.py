@@ -1535,6 +1535,41 @@ def _run_gemini_stage(client, model_name, prompt, schema):
     # realistic spike. The budget is per CALL; 16 windows x 6 dead attempts
     # was never the risk, the risk was the opposite (one spike, whole job).
     max_attempts = int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
+    # If the spike outlasts the budget on the primary, do not fail the job
+    # for a model-side traffic jam: ride a sibling family down the chain
+    # (same price tier, its own capacity pool) with a shorter budget.
+    # GEMINI_MODEL_FALLBACKS='' turns the chain off; GEMINI_MODEL also
+    # implies its -latest alias unless listed explicitly.
+    chain = [model_name]
+    fb_env = os.environ.get("GEMINI_MODEL_FALLBACKS")
+    fallbacks = ([m.strip() for m in fb_env.split(",") if m.strip()]
+                 if fb_env is not None
+                 else [f"{model_name}-latest", "gemini-2.5-flash-lite"])
+    for fb in fallbacks:
+        if fb and fb != model_name and fb not in chain:
+            chain.append(fb)
+    for ci, model in enumerate(chain):
+        try:
+            return _gemini_stage_attempts(client, model, prompt, schema, config,
+                                          use_local, max_attempts)
+        except _TransientStageError as e:
+            if ci == len(chain) - 1:
+                raise e.cause
+            print(f"♻️ Gemini {model} out of capacity after {max_attempts} tries; "
+                  f"falling through to {chain[ci + 1]}: {str(e.cause)[:120]}")
+
+
+class _TransientStageError(Exception):
+    """Wraps the last transient failure so the model chain can tell 'spike
+    outlasted the budget' (try the next model) from a hard failure (raise)."""
+
+    def __init__(self, cause):
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def _gemini_stage_attempts(client, model_name, prompt, schema, config,
+                           use_local, max_attempts):
     for attempt in range(1, max_attempts + 1):
         try:
             if use_local:
@@ -1568,8 +1603,14 @@ def _run_gemini_stage(client, model_name, prompt, schema):
                 # small model that skipped a required field this time.
                 'ConnectError', 'ReadTimeout', 'RemoteProtocolError', '502', '504',
                 'validation error'))
-            if attempt == max_attempts or not transient:
+            if not transient:
                 raise
+            if attempt == max_attempts:
+                if use_local:
+                    # A local server that stays down has no sibling to fall
+                    # through to; the operator's config is the fix.
+                    raise
+                raise _TransientStageError(e)
             # Full jitter (uniform 0..capped backoff): MAX_CONCURRENT_JOBS
             # workers failing in the same spike must not wake in lockstep.
             import random as _rj
