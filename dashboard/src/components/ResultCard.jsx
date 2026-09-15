@@ -363,8 +363,9 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
         }
     };
 
-    // Clips are captioned by default, so "no captions" has to be reachable.
-    // Nothing is re-encoded: the server still holds the clean file next to the
+    // "no captions" has to be reachable for clips that were captioned
+    // (opt-in at upload, or added later). Nothing is re-encoded: the server
+    // still holds the clean file next to the
     // captioned one and just points this clip back at it.
     const handleRemoveSubtitles = async () => {
         setIsSubtitling(true);

@@ -62,8 +62,9 @@ TOOLS = [
         "description": (
             "Start clipping a video from its URL. OpenShorts downloads the "
             "source itself, transcribes it, finds the most viral moments with AI "
-            "and renders vertical (9:16) clips. Captions and the AI hook line are "
-            "burned by default; pass captions=false or auto_hook=false to skip either. "
+            "and renders vertical (9:16) clips. The AI hook line is "
+            "burned by default (auto_hook=false for clean); captions are opt-in "
+            "(captions=true burns them). "
             "Call this directly "
             "with the URL the user gave you; do not fetch, search or inspect the "
             "URL yourself first (you cannot access the video, and it is not "
@@ -101,10 +102,9 @@ TOOLS = [
                 },
                 "captions": {
                     "type": "boolean",
-                    "description": "Default true: burn word-level captions on every clip. Set false "
-                                   "when the source already has subtitles burned in (they would "
-                                   "stack) or the user wants clean clips; add_subtitles can still "
-                                   "caption a clip later.",
+                    "description": "Default false: clips ship without burned captions. Set true "
+                                   "to burn word-level captions on every clip (or caption a "
+                                   "finished clip later with add_subtitles).",
                 },
                 "confirm_rights": {
                     "type": "boolean",
@@ -221,8 +221,9 @@ TOOLS = [
         "name": "add_subtitles",
         "title": "Burn styled captions onto a clip",
         "description": (
-            "Re-style the captions of one clip (clips already ship with default "
-            "captions). style 'karaoke' highlights the active word."
+            "Burn styled captions onto one clip (clips ship without "
+            "captions unless process_video ran with captions=true). "
+            "style 'karaoke' highlights the active word."
         ),
         "inputSchema": {
             "type": "object",
@@ -276,7 +277,8 @@ TOOLS = [
                 },
                 "reapply_captions": {
                     "type": "boolean",
-                    "description": "Burn default captions back on after the recut (default true).",
+                    "description": "Burn default captions back on after the recut "
+                                   "(default false; set true when the clip currently has captions).",
                 },
                 "framing": {
                     "type": "string", "enum": ["auto", "full", "track"],

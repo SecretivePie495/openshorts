@@ -1021,10 +1021,12 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
     the captions instead of burning a second layer over them.
 
     Returns the captioned path, or None when captions were skipped (silent
-    video, no words in range, AUTO_CAPTIONS=0, or any failure — a caption
-    problem must never cost the user the clip they already paid for).
+    video, no words in range, AUTO_CAPTIONS unset or not "1", or any failure —
+    a caption problem must never cost the user the clip they already paid for).
     """
-    if os.environ.get("AUTO_CAPTIONS", "1").strip() == "0":
+    # Opt-in everywhere: clips ship clean unless a caller (dashboard checkbox,
+    # captions=true, AUTO_CAPTIONS=1) explicitly asks for them.
+    if os.environ.get("AUTO_CAPTIONS", "0").strip() != "1":
         return None
     if not transcript or not transcript.get('segments'):
         return None  # silent video: nothing to caption

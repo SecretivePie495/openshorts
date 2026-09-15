@@ -232,8 +232,9 @@ class TestRerenderPaths:
         # Segments arrive rebased onto the canonical file (t=0 is source 10s).
         assert call["segments"] == [{"start": 2.0, "end": 12.0},
                                     {"start": 20.0, "end": 25.0}]
-        # Captions re-applied by default, against the clip-relative transcript.
-        assert call["captions_transcript"]["segments"][0]["words"]
+        # Captions are opt-in: clips ship clean by default, so a recut must
+        # not stamp a layer the user never asked for.
+        assert call["captions_transcript"] is None
 
     def test_source_path_reframes_from_retained_source(self, job, fake_recut):
         resp = _request("POST", "/api/clip/rerender", {
@@ -249,12 +250,12 @@ class TestRerenderPaths:
         # Source-absolute times, not rebased.
         assert call["segments"] == [{"start": 45.0, "end": 55.0}]
 
-    def test_reapply_captions_false_skips_the_transcript(self, job, fake_recut):
+    def test_reapply_captions_true_burns_the_virtual_transcript(self, job, fake_recut):
         resp = _request("POST", "/api/clip/rerender", {
-            "job_id": JOB_ID, "clip_index": 0, "reapply_captions": False,
+            "job_id": JOB_ID, "clip_index": 0, "reapply_captions": True,
             "segments": [{"start": 12, "end": 22}]})
         assert resp.status_code == 200
-        assert fake_recut[0]["captions_transcript"] is None
+        assert fake_recut[0]["captions_transcript"]["segments"][0]["words"]
 
     def test_framing_full_forces_source_path_and_persists(self, job, fake_recut):
         # In-range segments would take the fast path, but a framing override

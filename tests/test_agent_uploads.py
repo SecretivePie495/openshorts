@@ -82,13 +82,16 @@ def test_put_then_process_with_upload_id_and_captions_off(dirs, monkeypatch):
         "upload_id": slot["upload_id"], "confirm_rights": True, "captions": False}))
     assert "job_id" in payload, payload
     job = app_module.jobs[payload["job_id"]]
-    assert job["env"]["AUTO_CAPTIONS"] == "0"
+    # Off is the default now: an explicit false writes no env at all.
+    assert "AUTO_CAPTIONS" not in job["env"]
     assert slot["upload_id"] not in app_module.pending_uploads
     input_path = job["cmd"][job["cmd"].index("-i") + 1]
     assert os.path.exists(input_path) and input_path.startswith(str(up_root))
 
 
 def test_captions_default_leaves_env_alone(dirs, monkeypatch):
+    # Absent captions → AUTO_CAPTIONS unset → main.py's opt-in default (off):
+    # agents get clean clips unless they explicitly ask.
     slot = _tool_payload(_mcp("create_upload", {}))
     async def _put():
         async with _client() as c:
@@ -100,6 +103,20 @@ def test_captions_default_leaves_env_alone(dirs, monkeypatch):
     env = app_module.jobs[payload["job_id"]]["env"]
     assert "AUTO_CAPTIONS" not in env
     assert env["AUTO_HOOK"] == "1"  # MCP default matches the dashboard
+
+
+def test_captions_true_sets_the_env(dirs, monkeypatch):
+    slot = _tool_payload(_mcp("create_upload", {}))
+    async def _put():
+        async with _client() as c:
+            return await c.put(f"/api/uploads/{slot['upload_id']}", content=b"x" * 100)
+    assert asyncio.run(_put()).status_code == 200
+    async def fake_put(item): pass
+    monkeypatch.setattr(app_module.job_queue, "put", fake_put)
+    payload = _tool_payload(_mcp("process_video", {
+        "upload_id": slot["upload_id"], "confirm_rights": True, "captions": True}))
+    job = app_module.jobs[payload["job_id"]]
+    assert job["env"]["AUTO_CAPTIONS"] == "1"
 
 
 def test_unknown_or_unfinished_upload_id(dirs):

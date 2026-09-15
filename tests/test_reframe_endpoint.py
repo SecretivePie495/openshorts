@@ -126,19 +126,19 @@ class TestReframeRender:
         assert call["crop_overrides"][0] == 0.2
         assert call["crop_overrides"][1]["top"] == {"x": 0.6, "y": 0.5}
         assert call["crop_overrides"][1]["bottom"] == {"x": 0.3, "y": 0.4}
-        # Captions come back by default — every default clip ships with them.
-        assert call["captions_transcript"]["segments"][0]["words"]
+        # Captions are opt-in: a bare reframe must not burn a layer.
+        assert call["captions_transcript"] is None
 
         # Overrides persisted (string keys, JSON-style) for /scenes to serve.
         meta = json.loads(job["meta_path"].read_text())
         assert meta["shorts"][0]["crop_overrides"]["0"] == 0.2
 
-    def test_reapply_captions_false(self, job, fake_recut):
+    def test_reapply_captions_true(self, job, fake_recut):
         resp = _request("POST", "/api/clip/reframe", {
-            "job_id": JOB_ID, "clip_index": 0, "reapply_captions": False,
+            "job_id": JOB_ID, "clip_index": 0, "reapply_captions": True,
             "crop_overrides": {"0": 0.5}})
         assert resp.status_code == 200
-        assert fake_recut[0]["captions_transcript"] is None
+        assert fake_recut[0]["captions_transcript"]["segments"][0]["words"]
 
     def test_whole_clip_framing_carries_into_the_render(self, job, fake_recut):
         # recipe.framing='full' (the clip editor's selector) must keep forcing

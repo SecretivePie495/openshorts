@@ -40,6 +40,11 @@ export default function MediaInput({ onProcess, isProcessing }) {
     const [layout, setLayout] = useState(() => {
         try { return localStorage.getItem('os_layout') || 'auto'; } catch { return 'auto'; }
     });
+    // Captions: opt-in per upload — clips ship clean unless this is checked.
+    // The choice persists like the other advanced controls.
+    const [burnCaptions, setBurnCaptions] = useState(() => {
+        try { return localStorage.getItem('os_captions') === '1'; } catch { return false; }
+    });
     const infoRef = useRef(null);
 
     // Close the compatibility popover on any outside click.
@@ -89,12 +94,14 @@ export default function MediaInput({ onProcess, isProcessing }) {
             autoHook,
             autoHookStyle,
             layout,
+            burnCaptions,
         };
         try {
             localStorage.setItem('os_auto_hook', autoHook ? '1' : '0');
             localStorage.setItem('os_auto_hook_style', autoHookStyle);
             localStorage.setItem('os_layout', layout);
             localStorage.setItem('os_output_format', outputFormat);
+            localStorage.setItem('os_captions', burnCaptions ? '1' : '0');
         } catch { /* ignore */ }
         if (mode === 'url' && url) {
             onProcess({ type: 'url', payload: url, acknowledged: true, outputFormat, ...advanced });
@@ -259,7 +266,7 @@ export default function MediaInput({ onProcess, isProcessing }) {
                     >
                         <ChevronDown size={14} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
                         advanced options
-                        {(targetClips || clipMinSeconds || clipMaxSeconds || !autoHook) && (
+                        {(targetClips || clipMinSeconds || clipMaxSeconds || !autoHook || burnCaptions) && (
                             <span className="text-brass">·</span>
                         )}
                     </button>
@@ -339,6 +346,20 @@ export default function MediaInput({ onProcess, isProcessing }) {
                                         <option value="outline_yellow">Outline+</option>
                                     </select>
                                 )}
+                            </div>
+                            <div className="col-span-1 sm:col-span-3 flex flex-wrap items-center justify-between gap-3 pt-3 sm:pt-1 border-t border-rule">
+                                <label className="flex items-center gap-2 text-xs text-ink2 cursor-pointer select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={burnCaptions}
+                                        onChange={(e) => setBurnCaptions(e.target.checked)}
+                                        className="w-4 h-4 shrink-0 accent-[var(--color-accent)] cursor-pointer"
+                                    />
+                                    burn captions into clips
+                                </label>
+                                <span className="text-[11px] text-muted">
+                                    karaoke subtitles synced to the speech; can also be added to a finished clip later
+                                </span>
                             </div>
                         </div>
                     )}

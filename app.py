@@ -2441,12 +2441,12 @@ async def process_endpoint(
     if n_clips is not None or min_secs is not None or max_secs is not None:
         print(f"[gen-controls] job={job_id} clips={n_clips} band={min_secs}-{max_secs}")
 
-    # captions=false: the source already carries burned-in subtitles (or the
-    # caller adds its own later), so skip the free auto-caption pass instead
-    # of stacking a second layer. Absent → the deployment default (on).
-    if captions is not None and str(captions).lower() in ("0", "false", "no"):
-        env["AUTO_CAPTIONS"] = "0"
-        print(f"[captions] job={job_id} auto-captions off")
+    # Captions are opt-in everywhere: absent or false ships clean clips (the
+    # source may already carry burned-in subtitles, and the auto-caption pass
+    # would stack a second layer). Only an explicit truthy asks for them.
+    if captions is not None and str(captions).lower() in ("1", "true", "yes"):
+        env["AUTO_CAPTIONS"] = "1"
+        print(f"[captions] job={job_id} auto-captions on")
 
     input_path = None
     if url:
@@ -3373,7 +3373,10 @@ class RerenderRequest(BaseModel):
     clip_index: int
     segments: List[RerenderSegment]
     snap_to_words: bool = False
-    reapply_captions: bool = True
+    # Clips ship clean unless captions were asked for; re-burning by default
+    # would stamp a layer onto clips the user never captioned. The editor UI
+    # sends its own choice explicitly.
+    reapply_captions: bool = False
     # None = inherit the recipe's framing (so plain trims keep the look);
     # 'auto' resets to the classifier; 'full'/'track' force a layout.
     framing: Optional[str] = None
@@ -3589,7 +3592,7 @@ class ReframeRequest(BaseModel):
     # regions. Fractions travel instead of pixels so the editor never needs to
     # know the source dimensions.
     crop_overrides: Dict[str, Any]
-    reapply_captions: bool = True
+    reapply_captions: bool = False
 
 
 def _clip_scene_workfile(source_path, segments, output_dir, token):
@@ -3849,8 +3852,8 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
     reservation_id = await reserve_managed_action(
         request, rerender_minutes, req.job_id, "reframe")
 
-    # Every default clip ships with burned captions; re-rendering without them
-    # would silently hand back a caption-less file.
+    # Captions stay off a re-render unless the caller asks: clips ship clean by
+    # default, so re-burning here would stamp a layer the user never requested.
     v_transcript = (recut.virtual_transcript(data.get('transcript') or {}, segments)
                     if req.reapply_captions else None)
 
@@ -4190,8 +4193,9 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
     output_filename = f"subtitled_{generation_id}_{filename}"
     output_path = os.path.join(output_dir, output_filename)
 
-    # Burning captions is FREE. They're table stakes for short-form — a clip
-    # without them barely works on any platform — and the cost is nil: the SRT
+    # Burning captions is FREE (adding them after the fact must never feel
+    # like a purchase; generating them per clip is opt-in). The cost is nil:
+    # the SRT
     # comes from the transcript already sitting in metadata.json, and the burn is
     # a single short FFmpeg pass (4s on CPU for a 12s clip, 1-2s on the GPU).
     # Charging 2 minutes for that meant 10% of the whole free monthly quota per
