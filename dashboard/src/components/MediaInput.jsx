@@ -14,7 +14,11 @@ export default function MediaInput({ onProcess, isProcessing }) {
     const [url, setUrl] = useState('');
     const [file, setFile] = useState(null);
     const [acknowledged, setAcknowledged] = useState(false);
-    const [outputFormat, setOutputFormat] = useState('vertical'); // vertical | horizontal | square | letterbox
+    // Output format persists across sessions so a creator who always wants
+    // Boxed (or Square, etc.) doesn't have to reselect it on every upload.
+    const [outputFormat, setOutputFormat] = useState(() => {
+        try { return localStorage.getItem('os_output_format') || 'vertical'; } catch { return 'vertical'; }
+    }); // vertical | horizontal | square | letterbox
     const [showInfo, setShowInfo] = useState(false);
     // Advanced generation controls — empty string means "let the AI decide",
     // which keeps the default pipeline behavior untouched.
@@ -90,6 +94,7 @@ export default function MediaInput({ onProcess, isProcessing }) {
             localStorage.setItem('os_auto_hook', autoHook ? '1' : '0');
             localStorage.setItem('os_auto_hook_style', autoHookStyle);
             localStorage.setItem('os_layout', layout);
+            localStorage.setItem('os_output_format', outputFormat);
         } catch { /* ignore */ }
         if (mode === 'url' && url) {
             onProcess({ type: 'url', payload: url, acknowledged: true, outputFormat, ...advanced });

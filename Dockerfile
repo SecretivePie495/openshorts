@@ -38,20 +38,15 @@ WORKDIR /app
 # Install FFmpeg, OpenCV deps, Node.js + npm + git (for yt-dlp JS + bgutil build).
 # fontconfig + fonts-liberation back the subtitle font choices: without real
 # fonts libass falls back to DejaVu for every UI option (issue #57).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    curl \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    nodejs \
-    npm \
-    git \
-    fontconfig \
-    fonts-liberation \
-    fonts-noto-color-emoji \
+# ponytail: deb.debian.org drops the connection mid-batch on this VM; retry
+# once with --fix-missing (cached debs from the first pass complete the rest)
+RUN apt-get update && \
+    (apt-get install -y --no-install-recommends \
+      ffmpeg curl libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+      nodejs npm git fontconfig fonts-liberation fonts-noto-color-emoji \
+     || apt-get install -y --no-install-recommends --fix-missing \
+      ffmpeg curl libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+      nodejs npm git fontconfig fonts-liberation fonts-noto-color-emoji) \
     && rm -rf /var/lib/apt/lists/*
 
 # Deno JS runtime — required by yt-dlp for some extractor challenges.
