@@ -2150,7 +2150,29 @@ if __name__ == '__main__':
                         os.remove(clip_temp_path)
 
             _mark('render')
-            clip_workers = max(int(os.environ.get("CLIP_WORKERS", "3")), 1)
+            # An explicit CLIP_WORKERS is law. Otherwise size the pool to
+            # where the work actually runs: nvenc GPU (probe cached from the
+            # first cut) carries 3 clips side by side, x264 on N container
+            # cores wants one worker per ~6 cores — three 8-thread encodes
+            # on a 16-core container were measured (Mac, 15-sep) finishing
+            # serially because they fought each other for cores, and
+            # ffmpeg_utils splits the remaining threads across the pool.
+            from ffmpeg_utils import nvenc_available, set_concurrent_workers
+            _cw = os.environ.get("CLIP_WORKERS", "").strip()
+            if _cw:
+                clip_workers = max(int(_cw), 1)
+            elif nvenc_available():
+                clip_workers = 3
+            else:
+                import multiprocessing as _mp
+                try:
+                    _cores = len(_mp.sched_getaffinity(0))
+                except (AttributeError, OSError):
+                    _cores = os.cpu_count() or 4
+                clip_workers = max(1, min(3, _cores // 6))
+            set_concurrent_workers(clip_workers)
+            print(f"   ⚙️ Clip pool: {clip_workers} worker(s) "
+                  f"({'nvenc' if nvenc_available() else 'x264'})")
             shorts = clips_data['shorts']
             with ThreadPoolExecutor(max_workers=min(clip_workers, len(shorts))) as pool:
                 futures = {pool.submit(_process_one_clip, i, clip): i

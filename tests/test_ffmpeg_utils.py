@@ -23,13 +23,48 @@ def _clean_encoder_state(monkeypatch):
     reset_encoder_cache()
 
 
-def test_default_args_pin_historical_x264_settings():
-    assert video_encode_args(QUALITY) == [
+def test_default_args_pin_historical_x264_settings(monkeypatch):
+    # Default is now "auto": nvenc when the probe passes. Pin the probe off
+    # to assert the x264 tier args themselves are untouched.
+    monkeypatch.setenv("FFMPEG_ENCODER", "x264")
+    # (the thread cap is asserted separately; tiers themselves unchanged)
+    assert video_encode_args(QUALITY)[:6] == [
         "-c:v", "libx264", "-preset", "medium", "-crf", "18"]
-    assert video_encode_args(QUALITY_FAST) == [
+    assert video_encode_args(QUALITY_FAST)[:6] == [
         "-c:v", "libx264", "-preset", "fast", "-crf", "18"]
-    assert video_encode_args(DELIVERY) == [
+    assert video_encode_args(DELIVERY)[:6] == [
         "-c:v", "libx264", "-preset", "fast", "-crf", "22"]
+
+
+def test_auto_default_picks_nvenc_when_the_probe_passes(monkeypatch):
+    monkeypatch.delenv("FFMPEG_ENCODER", raising=False)
+    monkeypatch.setattr(ffmpeg_utils, "_probe_nvenc", lambda: True)
+    args = video_encode_args(QUALITY)
+    assert args[1] == "h264_nvenc"
+    # GPU encodes are not thread-capped: -threads is a CPU-pool argument.
+    assert "-threads" not in args
+
+
+def test_cpu_encodes_share_the_container_thread_budget(monkeypatch):
+    monkeypatch.setenv("FFMPEG_ENCODER", "x264")
+    monkeypatch.setattr(ffmpeg_utils, "_cpu_allowance", lambda: 16)
+    ffmpeg_utils.set_concurrent_workers(3)
+    try:
+        args = video_encode_args(QUALITY)
+        assert args[-2:] == ["-threads", "5"]  # 16 // 3, floor 2
+    finally:
+        ffmpeg_utils.set_concurrent_workers(1)
+    assert video_encode_args(QUALITY)[-2:] == ["-threads", "16"]
+
+
+def test_single_worker_is_never_thread_starved(monkeypatch):
+    monkeypatch.setenv("FFMPEG_ENCODER", "x264")
+    monkeypatch.setattr(ffmpeg_utils, "_cpu_allowance", lambda: 2)
+    ffmpeg_utils.set_concurrent_workers(8)  # absurd: more workers than cores
+    try:
+        assert video_encode_args(QUALITY)[-2:] == ["-threads", "2"]  # floor
+    finally:
+        ffmpeg_utils.set_concurrent_workers(1)
 
 
 def test_unknown_tier_raises():

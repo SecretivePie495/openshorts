@@ -184,13 +184,62 @@ def reset_encoder_cache():
         _announced = False
 
 
+# How many encodes run concurrently in this process. Every x264 encode
+# defaults to one thread PER CORE: three clip workers meant 3 x all-cores,
+# oversubscribed to death — measured on a Mac (15-sep-2026): three 20-45s
+# clips rendered "in parallel" and finished 2-4 min apart, i.e. they were
+# serialised by contention. The budget splits the cores instead.
+_worker_budget = 1
+_cpu_budget = None
+
+
+def set_concurrent_workers(n):
+    """Declare how many encodes may run at once (the clip pool calls this).
+    Also computes each encode's thread share from the CONTAINER's CPU
+    allowance, not the host's core count — Coolify cgroups the container,
+    and os.cpu_count() happily reports the whole box."""
+    global _worker_budget, _cpu_budget
+    _worker_budget = max(1, int(n or 1))
+    _cpu_budget = _cpu_allowance()
+
+
+def _cpu_allowance():
+    try:
+        # cgroup v2 (docker/Coolify): "max 100000" or "<quota> <period>"
+        with open("/sys/fs/cgroup/cpu.max") as fh:
+            quota_s, period_s = fh.read().split()[:2]
+        if quota_s != "max":
+            return max(1, int(int(quota_s) / int(period_s)))
+    except Exception:
+        pass
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as fh:
+            quota = int(fh.read())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as fh:
+            period = int(fh.read())
+        if quota > 0:
+            return max(1, quota // period)
+    except Exception:
+        pass
+    return os.cpu_count() or 4
+
+
+def _thread_budget():
+    return max(2, (_cpu_budget or os.cpu_count() or 4) // _worker_budget)
+
+
 def video_encode_args(tier=QUALITY):
     """Return the codec/quality args for one encode, honoring FFMPEG_ENCODER."""
     global _announced
     if tier not in _X264_ARGS:
         raise ValueError(f"Unknown encode tier: {tier!r}")
 
-    mode = os.environ.get("FFMPEG_ENCODER", "x264").strip().lower()
+    # "auto" (the default) = nvenc when the probe passes, x264 otherwise;
+    # the probe is cached and already knows how to fail quietly. Defaulting
+    # to x264 meant a GPU box encoded on its CPU unless someone remembered
+    # an env var that no compose file set (prod 15-sep: renders were the
+    # whole job time, and the container had nvenc idle).
+    mode = os.environ.get("FFMPEG_ENCODER", "auto").strip().lower()
     use_nvenc = False
     if mode in ("nvenc", "auto"):
         use_nvenc = nvenc_available()
@@ -203,7 +252,13 @@ def video_encode_args(tier=QUALITY):
         print(f"🎞️ [Encoder] video encoder: {'h264_nvenc' if use_nvenc else 'libx264'} "
               f"(FFMPEG_ENCODER={mode})")
 
-    return list((_NVENC_ARGS if use_nvenc else _X264_ARGS)[tier])
+    args = list((_NVENC_ARGS if use_nvenc else _X264_ARGS)[tier])
+    if not use_nvenc and "-threads" not in args:
+        # x264 only: its default spawns one thread per HOST core, which
+        # the worker pool would collectively overshoot. NVENC ignores
+        # -threads (GPU-side rate control), so it is left alone.
+        args += ["-threads", str(_thread_budget())]
+    return args
 
 
 def escape_filter_value(value):
