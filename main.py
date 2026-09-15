@@ -1500,6 +1500,35 @@ def clear_transcript_checkpoint(output_dir):
         print(f"⚠️ Could not remove transcript checkpoint: {e}")
 
 
+_stage_times = {}
+_stage_marks = {}
+
+
+def _mark(label):
+    """Start/stop a wall-clock segment; overlapping segments (the clip
+    render pool) sum their durations. Printed as a breakdown at job end so
+    'why was that slow?' has an answer in the job log itself."""
+    import time as _t
+    now = _t.time()
+    prev = _stage_marks.pop("_open", None)
+    if prev:
+        _stage_times[prev[0]] = _stage_times.get(prev[0], 0.0) + now - prev[1]
+    _stage_marks["_open"] = (label, now)
+
+
+def _render_stage_times():
+    import time as _t
+    now = _t.time()
+    prev = _stage_marks.pop("_open", None)
+    if prev:
+        _stage_times[prev[0]] = _stage_times.get(prev[0], 0.0) + now - prev[1]
+    total = sum(_stage_times.values())
+    parts = sorted(_stage_times.items(), key=lambda kv: -kv[1])
+    named = ", ".join(f"{k} {v:.0f}s" for k, v in parts)
+    print(f"⏱️  Stage breakdown: {named}"
+          + (f" | other {max(0.0, _t.time() - total):.0f}s" if parts else ""))
+
+
 def _run_stage(name, fn, timeout_min):
     """Run a whole-pipeline stage under a wall-clock watchdog.
 
@@ -1922,6 +1951,7 @@ if __name__ == '__main__':
             else:
                 output_dir = "."
         
+        _mark('download')
         input_video, video_title = _run_stage(
             'Download', lambda: download_youtube_video(args.url, output_dir),
             float(os.environ.get("STAGE_TIMEOUT_DOWNLOAD_MIN", "60")))
@@ -1949,6 +1979,7 @@ if __name__ == '__main__':
     # instead of one per clip, and the answer is a property of the material
     # ("this is a screencast"), which does not change between its own clips.
     # It runs before any render so the modules are switched on in time.
+    _mark('layout-pick')
     if layout_picker.ENABLED:
         try:
             _cap = cv2.VideoCapture(input_video)
@@ -2011,6 +2042,7 @@ if __name__ == '__main__':
                 print(f"♻️ Reusing the transcript from the interrupted run "
                       f"({len(transcript['segments'])} segments) — skipping transcription.")
         if transcript is None:
+            _mark('transcribe')
             try:
                 transcript = _run_stage(
                     'Transcription', lambda: transcribe_video(input_video),
@@ -2029,6 +2061,7 @@ if __name__ == '__main__':
 
         # 4. Gemini Analysis (transcript-driven, or vision for silent videos)
         if transcript is not None:
+            _mark('analyze')
             clips_data = get_viral_clips(transcript, duration)
         else:
             clips_data = get_visual_clips(input_video, duration)
@@ -2116,6 +2149,7 @@ if __name__ == '__main__':
                     if os.path.exists(clip_temp_path):
                         os.remove(clip_temp_path)
 
+            _mark('render')
             clip_workers = max(int(os.environ.get("CLIP_WORKERS", "3")), 1)
             shorts = clips_data['shorts']
             with ThreadPoolExecutor(max_workers=min(clip_workers, len(shorts))) as pool:
@@ -2143,4 +2177,5 @@ if __name__ == '__main__':
         clear_transcript_checkpoint(output_dir)
 
     total_time = time.time() - script_start_time
+    _render_stage_times()
     print(f"\n⏱️  Total execution time: {total_time:.2f}s")
