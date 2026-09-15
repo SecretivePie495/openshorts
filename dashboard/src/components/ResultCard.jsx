@@ -527,7 +527,9 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     size: payload.size,
                     style: payload.style || 'classic',
                     duration_seconds: payload.remotion?.displayDurationSec ?? null,
-                    input_filename: serverVideoFile
+                    input_filename: serverVideoFile,
+                    x_pct: payload.x_pct,
+                    y_pct: payload.y_pct,
                 })
             });
 

@@ -4350,6 +4350,8 @@ class HookRequest(BaseModel):
     duration_seconds: Optional[float] = None  # None = hook visible for the whole clip
     style: Optional[str] = "classic"  # classic/dark/yellow/red/outline/outline_yellow
     remove: Optional[bool] = False  # strip the burned hook instead of adding one
+    x_pct: Optional[float] = None  # free-drag center point (0-1), overrides position
+    y_pct: Optional[float] = None
 
 @app.post("/api/hook")
 async def add_hook(req: HookRequest, request: Request):
@@ -4424,7 +4426,7 @@ async def add_hook(req: HookRequest, request: Request):
         try:
             # Run in thread pool
             def run_hook():
-                add_hook_to_video(input_path, req.text, output_path, position=req.position, font_scale=font_scale, duration=req.duration_seconds, style=req.style)
+                add_hook_to_video(input_path, req.text, output_path, position=req.position, font_scale=font_scale, duration=req.duration_seconds, style=req.style, x_pct=req.x_pct, y_pct=req.y_pct)
 
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, run_hook)

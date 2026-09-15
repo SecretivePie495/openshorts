@@ -370,10 +370,11 @@ def create_hook_image(text, target_width, output_image_path="hook_overlay.png", 
     img.save(output_image_path)
     return output_image_path, canvas_w, canvas_h
 
-def add_hook_to_video(video_path, text, output_path, position="top", font_scale=1.0, duration=None, style="classic"):
+def add_hook_to_video(video_path, text, output_path, position="top", font_scale=1.0, duration=None, style="classic", x_pct=None, y_pct=None):
     """
     Overlays text hook onto video.
-    position: 'top', 'center', 'bottom'
+    position: 'top', 'center', 'bottom' (ignored if x_pct/y_pct given)
+    x_pct, y_pct: optional 0-1 free-drag center point, overrides position preset
     font_scale: float multiplier (1.0 = default)
     style: hook look (see HOOK_STYLES)
     """
@@ -410,15 +411,22 @@ def add_hook_to_video(video_path, text, output_path, position="top", font_scale=
         img_path, box_w, box_h = create_hook_image(text, target_box_width, hook_filename, font_scale=font_scale, style=style)
         
         # 3. Calculate Overlay Position
-        overlay_x = (video_width - box_w) // 2
-        
-        if position == "center":
+        if x_pct is not None and y_pct is not None:
+            # Free-drag: x_pct/y_pct is the box CENTER as a fraction of frame size.
+            overlay_x = int(video_width * x_pct) - box_w // 2
+            overlay_y = int(video_height * y_pct) - box_h // 2
+            overlay_x = max(0, min(overlay_x, video_width - box_w))
+            overlay_y = max(0, min(overlay_y, video_height - box_h))
+        elif position == "center":
+            overlay_x = (video_width - box_w) // 2
             overlay_y = (video_height - box_h) // 2
         elif position == "bottom":
              # Bottom 20% mark (approx)
+             overlay_x = (video_width - box_w) // 2
              overlay_y = int(video_height * 0.70)
         else:
              # Top 20% mark
+             overlay_x = (video_width - box_w) // 2
              overlay_y = int(video_height * 0.20)
         
         # 4. FFmpeg Command

@@ -123,7 +123,16 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
     });
   }
 
-  const positionStyle = POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
+  const positionStyle: React.CSSProperties =
+    config.xPct != null && config.yPct != null
+      ? {
+          left: `${config.xPct * 100}%`,
+          top: `${config.yPct * 100}%`,
+          right: "auto",
+          bottom: "auto",
+          transform: "translate(-50%, -50%)",
+        }
+      : POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
   const look = HOOK_LOOKS[config.style ?? "classic"] ?? HOOK_LOOKS.classic;
 
   // Base font size: 5% of 1080 width (matches hooks.py logic)

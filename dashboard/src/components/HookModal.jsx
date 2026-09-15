@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
@@ -33,6 +33,13 @@ const SIZE_OPTIONS = [
     { value: 'L', label: 'Large' },
 ];
 
+// Fallback anchor for the drag handle before the user has dragged at all.
+const PRESET_FRACTIONS = {
+    top: { x: 0.5, y: 0.2 },
+    center: { x: 0.5, y: 0.5 },
+    bottom: { x: 0.5, y: 0.75 },
+};
+
 // Last-used hook settings, restored on the next open (style always reset to
 // classic otherwise, which users read as the picker being broken).
 function loadHookPrefs() {
@@ -47,8 +54,35 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     const [style, setStyle] = useState(prefs.style || 'classic');
     const [entranceAnimation, setEntranceAnimation] = useState(prefs.entranceAnimation || 'spring');
     const [displayDuration, setDisplayDuration] = useState(5);
+    // Free-drag center point (0-1 fractions). null = use the top/center/bottom preset.
+    const [freePos, setFreePos] = useState(prefs.freePos || null);
+    const previewRef = useRef(null);
+    const draggingRef = useRef(false);
 
     if (!isOpen) return null;
+
+    const handlePos = freePos || PRESET_FRACTIONS[position] || PRESET_FRACTIONS.top;
+
+    const fractionFromPointer = (clientX, clientY) => {
+        const rect = previewRef.current.getBoundingClientRect();
+        return {
+            x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+            y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
+        };
+    };
+
+    const handleDragStart = (e) => {
+        e.preventDefault();
+        draggingRef.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const handleDragMove = (e) => {
+        if (!draggingRef.current) return;
+        setFreePos(fractionFromPointer(e.clientX, e.clientY));
+    };
+    const handleDragEnd = () => {
+        draggingRef.current = false;
+    };
 
     // Build hook config for Remotion preview
     const hookConfig = {
@@ -58,6 +92,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
         style,
         entranceAnimation,
         displayDurationSec: displayDuration,
+        ...(freePos ? { xPct: freePos.x, yPct: freePos.y } : {}),
     };
 
     const useRemotionPreview = !!videoUrl;
@@ -83,7 +118,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
         <Modal isOpen={isOpen} onClose={onClose} size="lg" eyebrow="EDITOR · HOOK" title="viral hook">
             <div className="flex flex-col md:flex-row gap-6">
                 {/* Left: Preview */}
-                <div className="flex-1 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16] max-h-[600px]">
+                <div ref={previewRef} className="flex-1 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16] max-h-[600px]">
                     {useRemotionPreview ? (
                         <RemotionPreview
                             videoUrl={videoUrl}
@@ -94,25 +129,74 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                     ) : (
                         <>
                             <video src={videoUrl} className="w-full h-full object-contain opacity-50" muted playsInline />
-                            <div className={`absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col h-full ${getPositionClass()}`}>
+                            {freePos ? (
                                 <div
-                                    className="text-black font-bold px-3 py-2 rounded-xl shadow-2xl text-center whitespace-pre-wrap transition-all duration-200"
-                                    style={{
-                                        ...getSizeStyle(),
-                                        backgroundColor: 'rgba(255, 255, 255, 0.82)',
-                                        fontFamily: 'Noto Serif, serif',
-                                        boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-                                        paddingTop: '10px',
-                                        paddingBottom: '10px',
-                                        paddingLeft: '12px',
-                                        paddingRight: '12px'
-                                    }}
+                                    className="absolute px-8 text-center pointer-events-none"
+                                    style={{ left: `${freePos.x * 100}%`, top: `${freePos.y * 100}%`, transform: 'translate(-50%, -50%)' }}
                                 >
-                                    {text || "Enter your text..."}
+                                    <div
+                                        className="text-black font-bold px-3 py-2 rounded-xl shadow-2xl text-center whitespace-pre-wrap transition-all duration-200"
+                                        style={{
+                                            ...getSizeStyle(),
+                                            backgroundColor: 'rgba(255, 255, 255, 0.82)',
+                                            fontFamily: 'Noto Serif, serif',
+                                            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+                                            paddingTop: '10px',
+                                            paddingBottom: '10px',
+                                            paddingLeft: '12px',
+                                            paddingRight: '12px'
+                                        }}
+                                    >
+                                        {text || "Enter your text..."}
+                                    </div>
                                 </div>
-                            </div>
+                            ) : (
+                                <div className={`absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col h-full ${getPositionClass()}`}>
+                                    <div
+                                        className="text-black font-bold px-3 py-2 rounded-xl shadow-2xl text-center whitespace-pre-wrap transition-all duration-200"
+                                        style={{
+                                            ...getSizeStyle(),
+                                            backgroundColor: 'rgba(255, 255, 255, 0.82)',
+                                            fontFamily: 'Noto Serif, serif',
+                                            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+                                            paddingTop: '10px',
+                                            paddingBottom: '10px',
+                                            paddingLeft: '12px',
+                                            paddingRight: '12px'
+                                        }}
+                                    >
+                                        {text || "Enter your text..."}
+                                    </div>
+                                </div>
+                            )}
                         </>
                     )}
+                    {/* Free-drag handle: drag anywhere on the frame to reposition the hook. */}
+                    <div
+                        onPointerDown={handleDragStart}
+                        onPointerMove={handleDragMove}
+                        onPointerUp={handleDragEnd}
+                        style={{
+                            position: 'absolute',
+                            left: `${handlePos.x * 100}%`,
+                            top: `${handlePos.y * 100}%`,
+                            transform: 'translate(-50%, -50%)',
+                            cursor: 'grab',
+                            zIndex: 20,
+                            padding: '4px 8px',
+                            borderRadius: 999,
+                            background: 'rgba(0,0,0,0.55)',
+                            border: '1px dashed rgba(255,255,255,0.7)',
+                            color: '#fff',
+                            fontSize: 10,
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase',
+                            touchAction: 'none',
+                            userSelect: 'none',
+                        }}
+                    >
+                        ⠿ drag
+                    </div>
                 </div>
 
                 {/* Right: Controls */}
@@ -163,10 +247,17 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                             <SegmentedControl
                                 options={POSITION_OPTIONS}
                                 value={position}
-                                onChange={setPosition}
+                                onChange={(v) => { setPosition(v); setFreePos(null); }}
                                 size="sm"
                             />
-                            {position === 'bottom' && hasCaptions && (
+                            <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+                                {freePos
+                                    ? <>Custom position — drag the handle on the preview to fine-tune, or{' '}
+                                        <button type="button" onClick={() => setFreePos(null)} className="underline underline-offset-2 hover:opacity-80">reset to preset</button>.
+                                      </>
+                                    : 'Or drag the handle on the preview to place it anywhere.'}
+                            </p>
+                            {position === 'bottom' && !freePos && hasCaptions && (
                                 <p className="text-[11px] text-warn mt-1.5 leading-relaxed">
                                     This clip has captions near the bottom — the hook may
                                     overlap them (and TikTok's UI). Top is the safe zone.
@@ -254,11 +345,13 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                             onClick={() => {
                                 try {
                                     localStorage.setItem('os_hook_prefs', JSON.stringify({
-                                        style, position, size, entranceAnimation,
+                                        style, position, size, entranceAnimation, freePos,
                                     }));
                                 } catch { /* ignore */ }
                                 onGenerate({
                                     text, position, size, style,
+                                    x_pct: freePos?.x,
+                                    y_pct: freePos?.y,
                                     // Remotion data
                                     remotion: hookConfig,
                                 });

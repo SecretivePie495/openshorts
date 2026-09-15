@@ -49,6 +49,9 @@ export interface HookConfig {
   entranceAnimation: HookEntrance;
   displayDurationSec: number;
   style?: HookStyle;
+  // Free-drag center point (0-1 of frame width/height). Overrides `position` when set.
+  xPct?: number;
+  yPct?: number;
 }
 
 // --- Effects config ---
@@ -110,6 +113,8 @@ export const hookConfigSchema = z.object({
   size: z.enum(["S", "M", "L"]),
   entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
   displayDurationSec: z.number().positive(),
+  xPct: z.number().min(0).max(1).optional(),
+  yPct: z.number().min(0).max(1).optional(),
 });
 
 export const effectSegmentSchema = z.object({
