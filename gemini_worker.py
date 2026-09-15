@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -437,6 +438,99 @@ def raise_if_blocked(response):
                 "provider's usage policies reject this material, so it can't be analyzed.")
 
 
+# Tokens that mark a failure as a traffic jam rather than a verdict: Google's
+# own 503 "high demand" (prod 15-sep-2026 killed a job on the old 3-try/15s
+# policy), quota throttle, and the truncated/empty 200s that ride the same
+# spikes. Everything NOT in this list raises immediately — a 400 or a policy
+# block is the same answer on every model and every retry.
+_TRANSIENT_TOKENS = (
+    '503', 'UNAVAILABLE', '429', 'RESOURCE_EXHAUSTED',
+    '500', 'INTERNAL', 'overloaded', 'Deadline',
+    'empty response body', 'did not contain a JSON object',
+    'Failed to parse Gemini JSON response',
+    # OpenAI-compatible servers (llm_backend path): model still loading, busy,
+    # or a small model that skipped a required field this time.
+    'ConnectError', 'ReadTimeout', 'RemoteProtocolError', '502', '504',
+    'validation error')
+
+
+def _is_transient(msg: str) -> bool:
+    return any(tok in msg for tok in _TRANSIENT_TOKENS)
+
+
+def _model_chain(primary: str):
+    """Primary + siblings with their own capacity pools. Google's limits are
+    PER MODEL (RPM/TPM/RPD each), so the -latest alias of a jammed primary
+    shares its pools and is useless as a fallback — the chain jumps families
+    instead. Default for the pipeline's 3.1-flash-lite: 3.5-flash-lite (the
+    same price tier, untouched on this key per 15-sep quota dashboards) then
+    2.5-flash-lite (even lower price, also priced in clip_selection).
+    GEMINI_MODEL_FALLBACKS='' turns the chain off; the list overrides the
+    default entirely for custom primaries."""
+    env = os.environ.get("GEMINI_MODEL_FALLBACKS")
+    if env is not None:
+        fallbacks = [m.strip() for m in env.split(",") if m.strip()]
+    elif primary == "gemini-3.1-flash-lite":
+        fallbacks = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]
+    else:
+        fallbacks = []
+    chain = [primary]
+    for fb in fallbacks:
+        if fb and fb != primary and fb not in chain:
+            chain.append(fb)
+    return chain
+
+
+def generate_with_capacity_chain(client, model_name, *, contents, config=None,
+                                 where="", budget=None, validate=None,
+                                 sleep=time.sleep):
+    """``client.models.generate_content`` + the full 503 survival kit.
+
+    GEMINI_STAGE_RETRIES attempts (default 6) with full jitter capped at 90s
+    per model (~7 min — the longest realistic spike), then rides the sibling
+    chain with a fresh budget per model. A model that stays dead past its
+    budget is a capacity problem, so the next one gets tried; anything that
+    is NOT transient (policy blocks, 400s) raises on the spot, and so does
+    the last model's final transient failure. Jitter keeps MAX_CONCURRENT_JOBS
+    workers from waking in lockstep on the same spike.
+
+    ``validate`` runs INSIDE the attempt loop (a raise from it counts as one
+    more try): Gemini sometimes answers 200 with an empty or unparseable
+    body, and only an in-loop check turns that into a second chance
+    (prod 22-jul-2026). Returns ``(validate(response) or response, winner)``
+    — the cost row must name the model that ANSWERED, not the one asked.
+    """
+    attempts = budget or int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
+    chain = _model_chain(model_name)
+    for ci, model in enumerate(chain):
+        last = None
+        for attempt in range(1, attempts + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model, contents=contents, config=config)
+                return (validate(response) if validate else response), model
+            except GeminiBlockedError:
+                raise
+            except Exception as e:
+                msg = str(e)
+                if not _is_transient(msg):
+                    raise
+                last = e
+                if attempt < attempts:
+                    import random as _rj
+                    wait = _rj.uniform(0, min(90, 5 * (2 ** (attempt - 1))))
+                    _log(f"⚠️ Gemini transient error{f' [{where}]' if where else ''} "
+                         f"(model={model}, attempt {attempt}/{attempts}), "
+                         f"retrying in {wait:.0f}s: {msg[:150]}")
+                    sleep(wait)
+        if ci < len(chain) - 1:
+            _log(f"♻️ Gemini {model} out of capacity after {attempts} tries"
+                 f"{f' [{where}]' if where else ''}; falling through to {chain[ci + 1]}: "
+                 f"{str(last)[:120]}")
+        else:
+            raise last
+
+
 def _get_response_text(response) -> str:
     try:
         text = response.text
@@ -566,25 +660,31 @@ def main() -> int:
     prompt = template.format(**fmt)
 
     _log(f"🤖 Gemini worker request: mode={args.mode} strategy={args.strategy} model={model_name} items={len(payload.get('windows', []))}")
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config=config,
-    )
 
-    raw_text = _get_response_text(response)
-    # With response_schema the SDK returns an already-validated object; fall
-    # back to the text-repair path only when that is unavailable.
-    parsed_obj = getattr(response, "parsed", None)
-    if parsed_obj is not None:
-        parsed = parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
-    else:
-        parsed = _parse_json_response_text(raw_text)
+    def _check(response):
+        # In-loop so a policy block aborts instantly and an empty 200 body
+        # costs a retry, not the job.
+        raise_if_blocked(response)
+        raw_text = _get_response_text(response)
+        parsed_obj = getattr(response, "parsed", None)
+        if parsed_obj is not None:
+            return parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
+        return _parse_json_response_text(raw_text)
+
+    box = {}
+    box["resp"] = None
+
+    def _validate(response):
+        box["resp"] = response
+        return _check(response)
+
+    parsed, winner = generate_with_capacity_chain(
+        client, model_name, contents=prompt, config=config, where=args.mode,
+        validate=_validate)
     result = {
         "mode": args.mode,
         "payload": parsed,
-        "cost_analysis": _calculate_cost_analysis(response, model_name),
-        "raw_text": raw_text,
+        "cost_analysis": _calculate_cost_analysis(box["resp"], winner),
     }
     with open(args.output_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)

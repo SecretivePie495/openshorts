@@ -204,15 +204,17 @@ def detect_content_ranges(video_path, video_duration):
                 return []
             time.sleep(2)
 
-        response = client.models.generate_content(
-            model=model_name,
+        # Capacity chain: see layout_picker — the except below degrades to
+        # face-only routing, so a spike should be waited out, not accepted.
+        response = gemini_worker.generate_with_capacity_chain(
+            client, model_name,
             contents=[file_upload,
                       gemini_worker.WIDE_CONTENT_PROMPT_TEMPLATE.format(
                           video_duration=video_duration)],
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=gemini_worker.WideContentResponse,
-            ))
+            ), where="screencast")
         gemini_worker.raise_if_blocked(response)
         raw = (json.loads(response.text) or {}).get("ranges") or []
     except Exception as e:

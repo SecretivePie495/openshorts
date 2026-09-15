@@ -157,13 +157,15 @@ def pick(video_path, video_duration):
         client = genai.Client(api_key=api_key)
         parts = [genai_types.Part.from_bytes(data=b, mime_type="image/jpeg")
                  for b in frames]
-        response = client.models.generate_content(
-            model=model_name,
+        # Capacity chain: a 503 spike on the primary must not quietly cost
+        # the video its layout pick (the except below degrades to "none").
+        response = gemini_worker.generate_with_capacity_chain(
+            client, model_name,
             contents=parts + [gemini_worker.LAYOUT_CHOICE_PROMPT],
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=gemini_worker.LayoutChoice,
-            ))
+            ), where="layout")
         gemini_worker.raise_if_blocked(response)
         answer = json.loads(response.text) or {}
     except Exception as e:

@@ -1522,101 +1522,59 @@ def _run_gemini_stage(client, model_name, prompt, schema):
     the call goes there instead of Gemini and ``client`` is unused; the
     retry policy is shared because a local server has the same failure
     shapes (connection refused while the model loads, a truncated body,
-    a 5xx from a busy vLLM)."""
-    use_local = llm_backend.active()
-    config = None if use_local else genai_types.GenerateContentConfig(
+    a 5xx from a busy vLLM). A local server that stays down has no sibling
+    to fall through to, so no model chain applies there.
+
+    The Gemini path delegates the survival kit — six jittered attempts,
+    then the GEMINI_MODEL_FALLBACKS sibling chain (15-sep-2026 capacity
+    503s) — to gemini_worker.generate_with_capacity_chain; parsing stays
+    per-attempt on purpose because Gemini sometimes returns 200 with an
+    empty body, which only the retry loop turns into a second chance
+    (prod 22-jul-2026)."""
+    if llm_backend.active():
+        return _run_local_stage(prompt, schema, model_name)
+    config = genai_types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=schema,
     )
-    # Google's own 503 "high demand" is a capacity spike measured in MINUTES
-    # (prod 15-sep-2026: a scoring call died after 3 tries spread over 15s,
-    # while the same job minutes later — the spike over — needed nothing).
-    # Six attempts with full jitter, capped at 90s, cover ~7 min: the longest
-    # realistic spike. The budget is per CALL; 16 windows x 6 dead attempts
-    # was never the risk, the risk was the opposite (one spike, whole job).
-    max_attempts = int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
-    # If the spike outlasts the budget on the primary, do not fail the job
-    # for a model-side traffic jam: ride a sibling family down the chain
-    # (same price tier, its own capacity pool) with a shorter budget.
-    # GEMINI_MODEL_FALLBACKS='' turns the chain off; GEMINI_MODEL also
-    # implies its -latest alias unless listed explicitly.
-    chain = [model_name]
-    fb_env = os.environ.get("GEMINI_MODEL_FALLBACKS")
-    fallbacks = ([m.strip() for m in fb_env.split(",") if m.strip()]
-                 if fb_env is not None
-                 else [f"{model_name}-latest", "gemini-2.5-flash-lite"])
-    for fb in fallbacks:
-        if fb and fb != model_name and fb not in chain:
-            chain.append(fb)
-    for ci, model in enumerate(chain):
+
+    box = {}
+
+    def _validate(response):
+        box["resp"] = response
+        # Policy blocks are deterministic — the helper re-raises them without
+        # retrying; parsing happens per attempt so a 200-with-empty-body
+        # counts as one more try (prod 22-jul-2026).
+        return _parse_gemini_stage(response)
+
+    parsed, winner = gemini_worker.generate_with_capacity_chain(
+        client, model_name, contents=prompt, config=config, where="stage",
+        validate=_validate)
+    return parsed, gemini_worker._calculate_cost_analysis(box["resp"], winner)
+
+
+def _parse_gemini_stage(response):
+    gemini_worker.raise_if_blocked(response)
+    parsed_obj = getattr(response, "parsed", None)
+    if parsed_obj is not None:
+        return parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
+    return gemini_worker._parse_json_response_text(
+        gemini_worker._get_response_text(response))
+
+
+def _run_local_stage(prompt, schema, model_name):
+    attempts = int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
+    for attempt in range(1, attempts + 1):
         try:
-            return _gemini_stage_attempts(client, model, prompt, schema, config,
-                                          use_local, max_attempts)
-        except _TransientStageError as e:
-            if ci == len(chain) - 1:
-                raise e.cause
-            print(f"♻️ Gemini {model} out of capacity after {max_attempts} tries; "
-                  f"falling through to {chain[ci + 1]}: {str(e.cause)[:120]}")
-
-
-class _TransientStageError(Exception):
-    """Wraps the last transient failure so the model chain can tell 'spike
-    outlasted the budget' (try the next model) from a hard failure (raise)."""
-
-    def __init__(self, cause):
-        super().__init__(str(cause))
-        self.cause = cause
-
-
-def _gemini_stage_attempts(client, model_name, prompt, schema, config,
-                           use_local, max_attempts):
-    for attempt in range(1, max_attempts + 1):
-        try:
-            if use_local:
-                return llm_backend.generate_json(prompt, schema, model=model_name)
-            response = client.models.generate_content(model=model_name, contents=prompt, config=config)
-            # Policy blocks are deterministic — retrying only burns quota and
-            # time, and the user deserves the real reason instead of a generic
-            # "empty response" (prod 23-jul: PROHIBITED_CONTENT on every try).
-            gemini_worker.raise_if_blocked(response)
-            # Parsing lives inside the retry loop on purpose: Gemini sometimes
-            # returns 200 with an empty body, which raises here rather than at
-            # the call. Retrying that recovered every occurrence seen in prod
-            # (22-jul-2026) — the same payload succeeds on the next attempt.
-            parsed_obj = getattr(response, "parsed", None)
-            if parsed_obj is not None:
-                parsed = parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
-            else:
-                parsed = gemini_worker._parse_json_response_text(
-                    gemini_worker._get_response_text(response))
-            return parsed, gemini_worker._calculate_cost_analysis(response, model_name)
-        except gemini_worker.GeminiBlockedError:
-            raise  # deterministic policy block — never retry
+            return llm_backend.generate_json(prompt, schema, model=model_name)
         except Exception as e:
             msg = str(e)
-            transient = any(tok in msg for tok in (
-                '503', 'UNAVAILABLE', '429', 'RESOURCE_EXHAUSTED',
-                '500', 'INTERNAL', 'overloaded', 'Deadline',
-                'empty response body', 'did not contain a JSON object',
-                'Failed to parse Gemini JSON response',
-                # OpenAI-compatible servers: model still loading, busy, or a
-                # small model that skipped a required field this time.
-                'ConnectError', 'ReadTimeout', 'RemoteProtocolError', '502', '504',
-                'validation error'))
-            if not transient:
+            if attempt == attempts or not gemini_worker._is_transient(msg):
                 raise
-            if attempt == max_attempts:
-                if use_local:
-                    # A local server that stays down has no sibling to fall
-                    # through to; the operator's config is the fix.
-                    raise
-                raise _TransientStageError(e)
-            # Full jitter (uniform 0..capped backoff): MAX_CONCURRENT_JOBS
-            # workers failing in the same spike must not wake in lockstep.
             import random as _rj
             wait = _rj.uniform(0, min(90, 5 * (2 ** (attempt - 1))))
-            who = "LLM server" if use_local else "Gemini"
-            print(f"⚠️ {who} transient error (attempt {attempt}/{max_attempts}), retrying in {wait:.0f}s: {msg[:150]}")
+            print(f"\u26a0\ufe0f LLM server transient error (attempt {attempt}/{attempts}), "
+                  f"retrying in {wait:.0f}s: {msg[:150]}")
             time.sleep(wait)
 
 
