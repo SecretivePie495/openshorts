@@ -109,6 +109,24 @@ export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, on
     }, []);
 
     const adjusted = Object.keys(overrides).length;
+    // Hand-tuned crop boxes are real work: closing threw them away with zero
+    // confirmation (the clip editor asks; this one didn't). savedOnce covers
+    // the X click right after a successful apply.
+    const [confirmDiscard, setConfirmDiscard] = useState(false);
+    const [savedOnce, setSavedOnce] = useState(false);
+    const [adjustedFlash, setAdjustedFlash] = useState(null);
+    useEffect(() => {
+        if (!adjustedFlash) return undefined;
+        const t = setTimeout(() => setAdjustedFlash(null), 4000);
+        return () => clearTimeout(t);
+    }, [adjustedFlash]);
+    const requestClose = useCallback(() => {
+        if (adjusted && !savedOnce) { setConfirmDiscard(true); return; }
+        // After a successful apply the tweaks are the clip's recipe now:
+        // closing discards nothing. Mid-apply either: the server finishes
+        // regardless (see the clip editor's note).
+        onClose();
+    }, [adjusted, savedOnce, onClose]);
 
     const handleSave = async () => {
         if (!adjusted || saving) return;
@@ -128,7 +146,10 @@ export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, on
                 body: JSON.stringify({ job_id: jobId, clip_index: clipIndex, crop_overrides: payload }),
             });
             if (onReframed) onReframed(clipIndex, res);
-            onClose();
+            // Stay open with a visible verdict: closing to the card the
+            // moment the render finished made "did it take?" a guess.
+            setSavedOnce(true);
+            setAdjustedFlash(`applied · ${adjusted} scene${adjusted === 1 ? '' : 's'}`);
         } catch (e) {
             setError(e?.message || 'The re-render failed.');
         } finally {
@@ -149,7 +170,7 @@ export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, on
                             {clipTitle && <p className="text-xs text-muted truncate">{clipTitle}</p>}
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-1.5 hover:bg-paper3 rounded-input transition-colors">
+                    <button onClick={requestClose} className="p-1.5 hover:bg-paper3 rounded-input transition-colors">
                         <X size={18} className="text-muted" />
                     </button>
                 </div>
@@ -193,21 +214,32 @@ export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, on
                     ))}
                 </div>
 
+                {confirmDiscard && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-[color-mix(in_oklab,var(--color-warn)_12%,transparent)] border-t border-warn/40">
+                        <span className="text-xs text-warn lowercase">
+                            discard your hand-tuned scenes?
+                        </span>
+                        <div className="flex gap-2">
+                            <button className="btn-danger text-xs py-1.5 px-3" onClick={onClose}>discard</button>
+                            <button className="btn-ghost text-xs py-1.5 px-3" onClick={() => setConfirmDiscard(false)}>keep editing</button>
+                        </div>
+                    </div>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border-t border-rule">
-                    <span className="text-xs text-muted">
-                        {adjusted === 0
+                    <span className={`text-xs ${adjustedFlash ? 'text-ok' : 'text-muted'}`}>
+                        {adjustedFlash || (adjusted === 0
                             ? 'nothing adjusted yet'
-                            : `${adjusted} scene${adjusted > 1 ? 's' : ''} reframed by hand`}
+                            : `${adjusted} scene${adjusted > 1 ? 's' : ''} reframed by hand`)}
                     </span>
                     <div className="flex items-center gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">
-                        <button onClick={onClose} className="btn-quiet py-2 px-4 text-sm">cancel</button>
+                        <button onClick={requestClose} className="btn-quiet py-2 px-4 text-sm">cancel</button>
                         <button
                             onClick={handleSave}
                             disabled={!adjusted || saving}
                             className="btn-primary py-2 px-4 text-sm disabled:opacity-40"
                         >
                             {saving ? <Loader2 size={16} className="animate-spin" /> : null}
-                            {saving ? 're-rendering…' : 'apply reframing'}
+                            {saving ? 're-rendering…' : adjustedFlash ? 'apply again' : 'apply reframing'}
                         </button>
                     </div>
                 </div>

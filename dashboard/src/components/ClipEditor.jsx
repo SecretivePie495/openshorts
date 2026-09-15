@@ -48,7 +48,10 @@ function totalOf(segments) {
 function editorReducer(state, action) {
     switch (action.type) {
         case 'init':
-            return { segments: action.segments, selected: 0, past: [], future: [], pendingBase: null };
+            // History survives a re-render on purpose: "undo" after a render
+            // lands should get the PRE-render edit back, which the user can
+            // then re-render. Losing it read as "my work vanished".
+            return { segments: action.segments, selected: 0, past: state.past, future: state.future, pendingBase: null };
         case 'select':
             return { ...state, selected: action.index };
         // Live drag feedback: replaces segments without touching history; the
@@ -99,6 +102,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const { refreshMe } = useAuth();
     const [edl, setEdl] = useState(null);
     const [loadError, setLoadError] = useState(null);
+    const [reload, setReload] = useState(0);
     const [state, dispatch] = useReducer(editorReducer, { segments: [], selected: 0, past: [], future: [], pendingBase: null });
     const { segments, selected } = state;
 
@@ -134,6 +138,23 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const dragRef = useRef(null);
     const [ghost, setGhost] = useState(null); // in-progress new segment on the source track
     const transcriptRef = useRef(null);
+    // The response of a running re-render resets the recipe; edits made while
+    // it is in flight would be silently destroyed by that reset. So mutations
+    // check this ref (live, unlike the state) and no-op, and the UI says so.
+    const renderingRef = useRef(false);
+    useEffect(() => { renderingRef.current = rendering; }, [rendering]);
+    // The paint-to-insert handler is bound once (window listeners); refs give
+    // it the current recipe and caps without re-binding.
+    const segmentsRef = useRef(segments);
+    useEffect(() => { segmentsRef.current = segments; }, [segments]);
+    const limitsRef = useRef(limits);
+    useEffect(() => { limitsRef.current = limits; }, [limits]);
+    const [paintNote, setPaintNote] = useState(null);
+    useEffect(() => {
+        if (!paintNote) return undefined;
+        const t = setTimeout(() => setPaintNote(null), 8000);
+        return () => clearTimeout(t);
+    }, [paintNote]);
 
     useEffect(() => {
         try { localStorage.setItem(HIDE_SOURCE_KEY, showSource ? '0' : '1'); } catch { /* private mode */ }
@@ -197,13 +218,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             }
         })();
         return () => { cancelled = true; };
-    }, [jobId, clipIndex]);
+    }, [jobId, clipIndex, reload]);
 
     const words = useMemo(() => (edl?.words || []), [edl]);
     const sourceAvailable = !!edl?.source?.available;
     const sourceDuration = edl?.source?.duration || 0;
     const canonical = useMemo(() => edl?.canonical_range || { start: 0, end: 0 }, [edl]);
-    const limits = edl?.limits || { max_segments: 12, min_segment_seconds: MIN_SEGMENT_SECONDS, max_total_seconds: 180 };
+    const limits = useMemo(() => edl?.limits || { max_segments: 12, min_segment_seconds: MIN_SEGMENT_SECONDS, max_total_seconds: 180 }, [edl]);
     const minSeg = limits.min_segment_seconds || MIN_SEGMENT_SECONDS;
 
     // The source panel is on screen only when there IS a source and the user
@@ -253,6 +274,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     }), [bounds.lo, bounds.hi, minSeg]);
 
     const setSegment = (index, next, { snap = true } = {}) => {
+        if (renderingRef.current) return;
         const updated = segments.map((s, i) => {
             if (i !== index) return s;
             const seg = { ...s, ...next };
@@ -266,6 +288,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     };
 
     const addSegment = () => {
+        if (renderingRef.current) return;
         if (segments.length >= limits.max_segments) return;
         const last = segments[segments.length - 1];
         let start = last ? last.end : bounds.lo;
@@ -276,11 +299,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     };
 
     const deleteSegment = (index) => {
+        if (renderingRef.current) return;
         if (segments.length <= 1) return;
         dispatch({ type: 'commit', segments: segments.filter((_, i) => i !== index), select: Math.max(0, index - 1) });
     };
 
     const moveSegment = (index, dir) => {
+        if (renderingRef.current) return;
         const j = index + dir;
         if (j < 0 || j >= segments.length) return;
         const next = segments.slice();
@@ -289,6 +314,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     };
 
     const splitSegment = (index) => {
+        if (renderingRef.current) return;
         if (segments.length >= limits.max_segments) return;
         const seg = segments[index];
         if (seg.end - seg.start < minSeg * 2) return;
@@ -363,6 +389,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     }, [onDragMove]);
 
     const startTrimDrag = (e, idx, edge, trackEl, secondsOnTrack) => {
+        if (rendering) return;
         // Only the primary button drags — and preventDefault is what stops
         // Chrome from turning the gesture into a text selection (and then into
         // a native drag-and-drop, which swallows every later pointer event and
@@ -415,14 +442,35 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             end: Math.round(d.snap(d.range.end, 'end') * 1000) / 1000,
         };
         if (seg.end - seg.start < d.minSeg) return;
-        // Marks, not a segment: dragging here proposes a range, and nothing
-        // enters the clip until it is sent. One concept instead of two, and
-        // the range stays adjustable before it is committed.
-        d.mark(seg.start, seg.end);
+        // Paint what you meant: an NLE user painting a range on the source
+        // expects it IN the clip, not in a two-step "mark then send" dance
+        // (the marks were the explanation the hint line hid on laptops).
+        // Inside a segment → that segment becomes the range; in a gap → a
+        // new segment lands there, keeping the timeline's order honest. The
+        // i/O mark-and-send cluster stays for three-point precision work.
+        if (renderingRef.current) return;
+        setPaintNote(null);
+        const base = segmentsRef.current;
+        const hit = base.findIndex((s) => seg.start >= s.start - 0.05 && seg.end <= s.end + 0.05);
+        if (hit >= 0) {
+            const updated = base.map((s, i) => (i === hit ? seg : s));
+            dispatch({ type: 'commit', segments: updated, select: hit });
+            return;
+        }
+        if (base.length >= limitsRef.current.max_segments) {
+            // Say it at the cursor's memory: the cap, not silence.
+            setPaintNote(`segment cap (${limitsRef.current.max_segments}) — replace one instead: i/O marks, then send`);
+            return;
+        }
+        const after = base.filter((s) => s.end <= seg.start).length;
+        const next = base.slice();
+        next.splice(after, 0, seg);
+        dispatch({ type: 'commit', segments: next, select: after });
     }, [onGhostMove]);
 
     const startGhostDrag = (e) => {
         if (e.button !== undefined && e.button !== 0) return;
+        if (rendering) return;
         if (!sourceAvailable || !sourceDuration) return;
         const rect = sourceTrackRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -439,7 +487,6 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             kind: 'ghost', startX: e.clientX, pxPerSec: rect.width / sourceDuration,
             t0, duration: sourceDuration, range: null, snap: snapEdge, minSeg,
             seek: seekSource,
-            mark: (a, b) => { setMarkIn(a); setMarkOut(b); },
         };
         window.addEventListener('pointermove', onGhostMove);
         window.addEventListener('pointerup', onGhostUp);
@@ -597,7 +644,11 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             const clamped = clampToCovered(t, t);
             return clamped === t ? t : clamped;
         });
-    }, [clampToCovered]);
+        // ...and it can renumber the spans under the playhead. A stale
+        // playSpanRef makes the next rAF tick walk from the WRONG span and
+        // yank playback across a segment boundary; re-anchor it here.
+        setPlayhead((t) => { playSpanRef.current = spanIndexAt(t); return t; });
+    }, [clampToCovered, spanIndexAt]);
 
     // ---- scrubbing the clip track ------------------------------------------
     // Clip time -> source time, walking the segment list. Same reasoning as the
@@ -770,7 +821,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     // 'replace' overwrites the selected segment (make the clip BE this range);
     // 'insert' drops the range in right after it, rippling the rest along.
     const sendToClip = (mode) => {
-        if (!markRange) return;
+        if (!markRange || renderingRef.current) return;
         if (mode === 'replace') {
             dispatch({
                 type: 'commit',
@@ -800,10 +851,27 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 return;
             }
             if (typing) return;
+            // The discard prompt is modal in spirit: Space/Backspace behind it
+            // deleting a segment while the user reads "discard changes?" is
+            // how editors get blamed for their own keyboard shortcuts.
+            if (confirmClose) return;
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
                 e.preventDefault();
-                dispatch({ type: e.shiftKey ? 'redo' : 'undo' });
+                if (!rendering) dispatch({ type: e.shiftKey ? 'redo' : 'undo' });
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                // One-frame-ish nudge of the START edge (Shift: the END edge) —
+                // the precision every NLE has and this editor lacked.
+                e.preventDefault();
+                const seg = segments[selected];
+                if (!seg || rendering) return;
+                const step = e.altKey ? 0.01 : 0.1;
+                const edge = e.shiftKey ? 'end' : 'start';
+                const delta = (e.key === 'ArrowRight' ? step : -step);
+                setSegment(selected, { [edge]: Math.round((seg[edge] + delta) * 1000) / 1000 }, { snap: false });
             } else if (e.key === ' ') {
+                // A <video> with focus toggles natively too — handle it there
+                // once, not twice.
+                if ((e.target?.tagName || '').toLowerCase() === 'video') return;
                 e.preventDefault();
                 const v = videoRef.current;
                 if (v) { if (v.paused) v.play().catch(() => {}); else v.pause(); }
@@ -955,7 +1023,17 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 <div className="card p-6 max-w-md" onMouseDown={(e) => e.stopPropagation()}>
                     <p className="eyebrow mb-2">EDITOR · CLIP {clipIndex + 1}</p>
                     <div className="flex items-center gap-2 text-danger text-sm"><AlertCircle size={16} /> {loadError}</div>
-                    <button className="btn-ghost mt-5" onClick={onClose}>close</button>
+                    <div className="flex gap-2 mt-5">
+                        {/* A failed GET is usually a blip; "close" as the only
+                            option made the user re-queue the whole editor. */}
+                        <button
+                            className="btn-ghost"
+                            onClick={() => { setLoadError(null); setReload((n) => n + 1); }}
+                        >
+                            retry
+                        </button>
+                        <button className="btn-primary" onClick={onClose}>close</button>
+                    </div>
                 </div>
             </div>
         );
@@ -963,9 +1041,16 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
 
     if (!edl) {
         return (
-            <div className="fixed inset-0 z-[110] bg-paper/90 flex items-center justify-center animate-fade">
-                <div className="flex items-center gap-3 text-muted text-sm lowercase">
+            <div className="fixed inset-0 z-[110] bg-paper flex flex-col animate-fade">
+                {/* Skeleton of the real layout: the wait reads as the editor
+                    arriving, not as a different page. */}
+                <div className="px-4 sm:px-6 py-4 border-b border-rule flex items-center gap-3 text-muted text-sm lowercase">
                     <Loader2 size={18} className="animate-spin text-brass" /> loading clip recipe…
+                </div>
+                <div className="flex-1 flex gap-4 p-6">
+                    <div className="flex-1 rounded-card bg-paper2 animate-pulse" />
+                    <div className="w-72 rounded-card bg-paper2 animate-pulse" />
+                    <div className="w-[21rem] rounded-card bg-paper2 animate-pulse hidden xl:block" />
                 </div>
             </div>
         );
@@ -996,8 +1081,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     {!sourceAvailable && ' · EXPIRED — TRIMS LIMITED TO THE ORIGINAL RANGE'}
                 </p>
                 {sourceAvailable && (
-                    <p className="readout hidden xl:block truncate">
-                        DRAG EMPTY SPACE TO MARK IN/OUT · BLOCK TO MOVE · EDGES TO TRIM
+                    <p className="readout truncate hidden sm:block">
+                        DRAG EMPTY SPACE = ADD OR REPLACE THAT PART · BLOCK TO MOVE · EDGES TO TRIM
                     </p>
                 )}
             </div>
@@ -1087,6 +1172,9 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 <span className="readout">{fmt(sourceDuration / 2)}</span>
                 <span className="readout">{fmt(sourceDuration)}</span>
             </div>
+            {paintNote && (
+                <p className="text-[11px] text-warn mt-1 lowercase leading-relaxed">{paintNote}</p>
+            )}
         </div>
     );
 
@@ -1299,6 +1387,9 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 <div className={`flex flex-col min-h-0 gap-2 ${sourceOpen ? 'xl:w-[26rem] 2xl:w-[30rem] xl:shrink-0' : 'flex-1'}`}>
                     <div className="flex items-center justify-between gap-2 shrink-0">
                         <p className="eyebrow">Program</p>
+                        {rendering && (
+                            <span className="readout text-brass">RENDER IN PROGRESS · EDITING LOCKED</span>
+                        )}
                         {dirty && (
                             <span className="badge-warn">
                                 {missingSeconds > COVERAGE_EPSILON
@@ -1417,25 +1508,23 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                         <div className="flex items-center gap-2">
                                             <span className="w-4 h-4 rounded-full shrink-0" style={{ background: SEGMENT_COLORS[i % SEGMENT_COLORS.length] }} />
                                             <span className="readout">#{i + 1}</span>
-                                            <input
-                                                type="number"
-                                                step="0.1"
-                                                value={seg.start}
-                                                onClick={(e) => e.stopPropagation()}
-                                                onChange={(e) => setSegment(i, { start: parseFloat(e.target.value) || 0 }, { snap: false })}
-                                                className="input-field w-20 py-1 px-1.5 text-xs text-center"
-                                                aria-label={`segment ${i + 1} start`}
-                                            />
+                                            <span onClick={(e) => e.stopPropagation()}>
+                                                <TimeInput
+                                                    value={seg.start}
+                                                    disabled={rendering}
+                                                    onCommit={(n) => setSegment(i, { start: n }, { snap: false })}
+                                                    label={`segment ${i + 1} start`}
+                                                />
+                                            </span>
                                             <span className="text-muted text-xs">→</span>
-                                            <input
-                                                type="number"
-                                                step="0.1"
-                                                value={seg.end}
-                                                onClick={(e) => e.stopPropagation()}
-                                                onChange={(e) => setSegment(i, { end: parseFloat(e.target.value) || 0 }, { snap: false })}
-                                                className="input-field w-20 py-1 px-1.5 text-xs text-center"
-                                                aria-label={`segment ${i + 1} end`}
-                                            />
+                                            <span onClick={(e) => e.stopPropagation()}>
+                                                <TimeInput
+                                                    value={seg.end}
+                                                    disabled={rendering}
+                                                    onCommit={(n) => setSegment(i, { end: n }, { snap: false })}
+                                                    label={`segment ${i + 1} end`}
+                                                />
+                                            </span>
                                             <span className="readout ml-auto">{fmt(seg.end - seg.start)}</span>
                                         </div>
                                         <div className="flex items-center gap-1 mt-2">
@@ -1529,7 +1618,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                         <div>
                             <p className="eyebrow mb-2">Shortcuts</p>
                             <p className="readout leading-relaxed">
-                                SPACE PLAY · S SPLIT · ⌫ DELETE · ⌘Z UNDO
+                                SPACE PLAY · S SPLIT · ⌫ DELETE · ⌘Z UNDO · ←/→ NUDGE EDGE
                                 {sourceOpen && ' · I MARK IN · O MARK OUT · , INSERT · . REPLACE'}
                             </p>
                         </div>
@@ -1581,6 +1670,45 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
 // It returns a Fragment rather than a wrapper element so the words stay direct
 // children of the scroll box — the flex-wrap layout and the anchor's offsetTop
 // both depend on that.
+// A number input that commits on blur/Enter instead of on every keystroke:
+// typing "19" used to route "1" through the clamp (a segment teleporting to
+// the boundary, one undo entry per digit) before the second digit arrived.
+// The draft is local — the field never fights its own display value.
+function TimeInput({ value, onCommit, disabled, label }) {
+    const [draft, setDraft] = useState(null);
+    const shown = draft ?? (Number.isFinite(value) ? value : 0);
+    const commit = () => {
+        if (draft !== null) {
+            const n = parseFloat(draft);
+            if (Number.isFinite(n)) onCommit(n);
+            setDraft(null);
+        }
+    };
+    return (
+        <input
+            type="number"
+            step="0.1"
+            value={shown}
+            disabled={disabled}
+            aria-label={label}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') { commit(); e.target.blur(); }
+                if (e.key === 'Escape') setDraft(null);
+                // Native step buttons only fire onChange; keep them instant.
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    if (draft === null) {
+                        e.preventDefault();
+                        onCommit(Math.round((value + (e.key === 'ArrowUp' ? 0.1 : -0.1)) * 1000) / 1000);
+                    }
+                }
+            }}
+            className="input-field w-20 py-1 px-1.5 text-xs text-center disabled:opacity-40"
+        />
+    );
+}
+
 const TranscriptChunk = React.memo(function TranscriptChunk({
     items, offset, lit, active, anchorAt, selectedAt, onPick,
 }) {

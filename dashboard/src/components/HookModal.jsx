@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
@@ -49,6 +49,17 @@ function loadHookPrefs() {
 export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isProcessing, videoUrl, initialText, durationInSeconds, existingSubtitles, hasCaptions, serverRender, burnedHook }) {
     const prefs = loadHookPrefs();
     const [text, setText] = useState(initialText || 'POV: You are using the viral hook feature');
+    // The modal stays mounted behind `isOpen`: without this, reopening it
+    // after an edit (or on another clip) showed the PREVIOUS clip's text and
+    // the previous clip's drag position. Re-sync on open with new content.
+    const lastInitial = useRef(null);
+    useEffect(() => {
+        if (isOpen && initialText !== lastInitial.current) {
+            lastInitial.current = initialText;
+            if (initialText) setText(initialText);
+            setFreePos(null);
+        }
+    }, [isOpen, initialText]);
     const [position, setPosition] = useState(prefs.position || 'top');
     const [size, setSize] = useState(prefs.size || 'M');
     const [style, setStyle] = useState(prefs.style || 'classic');
