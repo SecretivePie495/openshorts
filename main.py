@@ -859,17 +859,22 @@ def download_youtube_video(url, output_dir="."):
         return sanitized
 
     # DIRECT_FIRST=1: try the server's own IP before spending proxy bandwidth.
-    # Needs cookies + a PO-token provider — without both, YouTube flags the
-    # datacenter IP after the first request (verified in prod, 21-jul-2026).
+    # Needs a PO-token provider — without one, YouTube flags the datacenter
+    # IP after the first request (verified in prod, 21-jul-2026). Cookies are
+    # no longer a precondition: every attempt below goes out anonymously
+    # first, and the account cookie jar is only ever the last try.
     _direct_first = (os.environ.get("DIRECT_FIRST", "").strip() == "1"
-                     and (_proxy or _statics) and hd_args and cookies_path)
+                     and (_proxy or _statics) and hd_args)
 
-    # A fallback attempt runs anonymously when an HD attempt (with cookies)
-    # already failed on the same route: the account cookies are what narrows
-    # yt-dlp to the clients that die with "Video unavailable", and the
-    # anonymous defaults were measured at 1080p on the same static IP. With
-    # no HD path at all (self-host without a PO token provider) the fallback
-    # is the only attempt, so it keeps the cookies the operator configured.
+    # Anonymous first, everywhere. The account cookies narrow YouTube to the
+    # clients that die with UNPLAYABLE / "Video unavailable" on a share of
+    # videos (measured in prod, all three statics, 9-sep-2026: cookies ->
+    # unavailable, anonymous on the same IP -> 1080p), and the PO-token
+    # provider serves the HD path without them. So every route is attempted
+    # with no cookiefile, and ONE bearing-the-cookies attempt rides last on
+    # a FREE route — the only thing cookies still buy is age-gated and
+    # private content, and they must never be what a healthy anonymous video
+    # trips over.
     # Every attempt asks for the same 1080p spec: the fallback used to ask
     # for `best[ext=mp4]/best`, the best single-file format, which on
     # YouTube is the 360p progressive one even with 1080p streams listed.
@@ -878,10 +883,15 @@ def download_youtube_video(url, output_dir="."):
          fallback_args if label.startswith('fallback') else hd_args,
          _hd_fmt_for(capped),
          proxy,
-         not (label.startswith('fallback') and hd_args))
+         False)
         for label, capped, proxy in plan_download_attempts(
             _direct_first, _statics, _proxy, bool(hd_args), youtube=is_youtube_url(url))
     ]
+    if cookies_path and attempts:
+        _ck_proxy = _statics[0] if _statics else (None if hd_args else _proxy)
+        _ck_args = hd_args if hd_args else fallback_args
+        attempts.append(('cookies', _ck_args, _hd_fmt_for(_ck_proxy == _proxy),
+                         _ck_proxy, True))
     if not is_youtube_url(url):
         print("🌐 Direct file URL: downloading from the server's own IP (no proxy).")
 

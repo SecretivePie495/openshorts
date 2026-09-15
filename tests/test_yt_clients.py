@@ -60,10 +60,17 @@ def test_probe_uses_the_same_lists(monkeypatch):
 
     monkeypatch.setattr(metering, "_probe_with_proxies", fake)
     metering.probe_url_minutes("https://www.youtube.com/watch?v=abc")
-    # (extractor args, send the cookies): the fallback step goes out anonymously,
-    # like the download's 'fallback-static' attempt — see
-    # tests/test_probe_anonymous_fallback.py.
+    # No account configured: the single step goes out anonymously.
     assert seen["strategies"] == [
-        (yt_clients.hd_extractor_args("", "/opt/gen.js"), True),
-        (yt_clients.fallback_extractor_args("", "/opt/gen.js"), False),
+        (yt_clients.hd_extractor_args("", "/opt/gen.js"), False),
+    ]
+
+    # With one, it joins only as the trailing try (anonymous first, see
+    # tests/test_probe_anonymous_fallback.py) — never as the opener.
+    monkeypatch.setenv("YOUTUBE_COOKIES",
+                       "# Netscape HTTP Cookie File\n")
+    metering.probe_url_minutes("https://www.youtube.com/watch?v=abc")
+    assert seen["strategies"] == [
+        (yt_clients.hd_extractor_args("", "/opt/gen.js"), False),
+        (yt_clients.fallback_extractor_args("", "/opt/gen.js"), True),
     ]

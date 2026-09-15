@@ -43,10 +43,16 @@ WORKDIR /app
 RUN apt-get update && \
     (apt-get install -y --no-install-recommends \
       ffmpeg curl libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
-      nodejs npm git fontconfig fonts-liberation fonts-noto-color-emoji \
+      git fontconfig fonts-liberation fonts-noto-color-emoji \
      || apt-get install -y --no-install-recommends --fix-missing \
       ffmpeg curl libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
-      nodejs npm git fontconfig fonts-liberation fonts-noto-color-emoji) \
+      git fontconfig fonts-liberation fonts-noto-color-emoji) \
+    && rm -rf /var/lib/apt/lists/*
+
+# Debian's apt nodejs is v20; bgutil's script-node PO token provider needs >=22
+# to run without cookies at all (avoids YouTube bot-check requiring account login).
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Deno JS runtime — required by yt-dlp for some extractor challenges.

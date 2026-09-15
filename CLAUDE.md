@@ -354,10 +354,21 @@ the per-GB proxy, which then fetched 360p through the same dead list.
 Measured in the prod container on 6-sep-2026, same static, same video:
 cookies + defaults → unavailable; cookies + `default,mweb` → 1080p; no
 cookies → 1080p. `mweb` needs the PO token, and the token needs the
-webpage: never put `player_skip: webpage` back. A fallback attempt runs
-anonymously when an HD attempt already failed with the cookies on that
-route, and every attempt asks for the 1080p format spec (the old
-`best[ext=mp4]` fallback spec was itself the 360p progressive file).
+webpage: never put `player_skip: webpage` back. **Every attempt on every
+route goes out anonymously** (probe and download alike, since 15-sep-2026),
+and `YOUTUBE_COOKIES` is only ever the **last** try, on a free route: with
+the cookies attached YouTube answers UNPLAYABLE for every client
+(`web_embedded`, `tv_downgraded`, `web` **and** `mweb`) on a share of videos,
+which yt-dlp reports as "Video unavailable" (9-sep-2026, same video on all
+three statics; anonymous on the same IP → 1080p 137+140) — cookies-first
+read that as an IP problem and escalated to the per-GB proxy, which carries
+the same cookies and fails identically, while the download recovered for
+free on the same static. Cookies still matter for what they actually buy:
+age-gated/private content, and the static-IP anonymous rate-limit bursts
+("Sign in to confirm you're not a bot", 4-sep-2026: ~10 probes in one hour,
+1.8 MB each on the per-GB proxy) that the trailing authed try now recovers
+on the same free route. Every attempt asks for the 1080p format spec (the
+old `best[ext=mp4]` fallback spec was itself the 360p progressive file).
 Two rules keep the per-GB proxy at zero on a normal day: the probe
 reaches it **only** when a static route failed for a reason another IP can
 fix (`static_failure_warrants_paid`: bot-check, 403/429, proxy/network
@@ -367,21 +378,7 @@ probes, 3-5 sep) or a live stream
 with no duration (those failed the same on every IP and used to cost ~1.7 MB
 × 2 extractors each), and **never for a non-YouTube URL** (the download
 plan already excluded those; Twitch, Kick, Rumble and product pages were
-reaching it through the probe). The probe also carries `YOUTUBE_COOKIES`,
-like the download does: an anonymous probe from the static IPs gets "Sign in
-to confirm you're not a bot" in bursts (4-sep-2026: ~10 probes in one hour,
-1.8 MB each on the per-GB proxy) because a datacenter IP's anonymous rate
-limit is low and we make ~400 YouTube hits a day from three of them, while
-the authenticated download sails through the same IPs. But the **first**
-attempt on a route carries them and the second drops them, on the probe as
-on the download: with the cookies attached YouTube answers UNPLAYABLE for
-every client (`web_embedded`, `tv_downgraded`, `web` **and** `mweb`) on a
-share of videos, which yt-dlp reports as "Video unavailable" (9-sep-2026,
-same video on all three statics; anonymous on the same IP → 1080p 137+140).
-Without that anonymous second attempt the probe read a cookie problem as an
-IP problem and escalated to the per-GB proxy, which carries the same cookies
-and fails identically, while the download recovered for free on the same
-static. `main.py` prints `PROXY_ROUTE=<json>` after
+reaching it through the probe). `main.py` prints `PROXY_ROUTE=<json>` after
 every download (winner, paid bytes across all attempts including failed
 paid ones, each free attempt's error); `app.py` persists it as a
 `proxy_usage` row at job end and pages Telegram when the paid proxy carried

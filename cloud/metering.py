@@ -170,19 +170,22 @@ def probe_url_minutes(url: str, allow_paid: bool = True) -> float:
     # each of those probes then paid the per-GB proxy for nothing.
     from yt_clients import hd_extractor_args, fallback_extractor_args
     hd_args = hd_extractor_args(bgutil_http, bgutil_script)
-    # (extractor args, send the account cookies). The second attempt on each
-    # route drops the cookies, exactly like the download's 'fallback-static'
-    # step (main.py): with the cookies attached YouTube answers UNPLAYABLE for
-    # every client — web_embedded, tv_downgraded, web AND mweb — on a share of
-    # videos, and yt-dlp reports that as "Video unavailable" (measured in prod
-    # 9-sep-2026, all three statics, same video anonymous → 1080p 137+140).
-    # Without this step the probe read that as an IP problem and escalated to
-    # the per-GB proxy, which carries the same cookies and fails identically,
-    # while the download quietly recovered anonymously on the same static.
-    # With no HD path at all (self-host, no PO token provider) the fallback is
-    # the only attempt, so it keeps the cookies the operator configured.
-    strategies = ([(hd_args, True)] if hd_args else []) + [
-        (fallback_extractor_args(bgutil_http, bgutil_script), not hd_args)]
+    # (extractor args, send the account cookies). Anonymous first, exactly
+    # like the download (main.py): with the cookies attached YouTube answers
+    # UNPLAYABLE for every client — web_embedded, tv_downgraded, web AND
+    # mweb — on a share of videos, and yt-dlp reports that as "Video
+    # unavailable" (measured in prod 9-sep-2026, all three statics, same
+    # video anonymous → 1080p 137+140). The authed attempt rides last on
+    # every route, for the age-gated/private content that genuinely needs an
+    # account. Without it here, the probe reads a cookie problem as an IP
+    # problem and escalates to the per-GB proxy, which carries the same
+    # cookies and fails identically. With no HD path at all (self-host, no
+    # PO token provider) the fallback is the only anonymous attempt, so the
+    # trailing cookie try still follows it.
+    _ck = bool(os.environ.get("YOUTUBE_COOKIES"))
+    _fb = fallback_extractor_args(bgutil_http, bgutil_script)
+    strategies = ([(hd_args, False)] if hd_args else [(_fb, False)])
+    strategies = strategies + ([(_fb, True)] if _ck else [])
 
     # Rotated per probe to spread load across the pool, like the download does.
     statics = [p.strip() for p in
@@ -205,10 +208,13 @@ def probe_url_minutes(url: str, allow_paid: bool = True) -> float:
     )
     static_errors: dict = {}
 
-    # Same cookies + PO token the download uses: an anonymous probe gets
-    # "Sign in to confirm you're not a bot" from the static IPs (4-sep-2026,
-    # all three, ~10 probes/day paying 1.8 MB each on the per-GB proxy)
-    # while the authenticated download sails through the same IPs.
+    # The account cookie jar is still built and sent — but only on the
+    # trailing per-route attempt (see strategies above). Anonymous-first
+    # fixes the 9-sep cookie problem; the cookies remain for the 4-sep
+    # failure mode (an anonymous probe from a rate-limited datacenter IP
+    # gets "Sign in to confirm you're not a bot" on every client), which
+    # now recovers on the same free route instead of escalating to the
+    # per-GB proxy.
     cookies_env = os.environ.get("YOUTUBE_COOKIES")
     ck_path = None
     if cookies_env:
