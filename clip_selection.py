@@ -10,6 +10,7 @@ MODEL_PRICES = {
     "gemini-3.5-flash": (1.50, 9.00),
     "gemini-3.1-flash-lite": (0.25, 1.50),
     "gemini-3.5-flash-lite": (0.25, 1.50),
+    "gemini-3-flash": (0.50, 3.00),
     "gemini-3-flash-preview": (0.50, 3.00),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),

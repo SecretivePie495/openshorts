@@ -471,7 +471,12 @@ def _model_chain(primary: str):
     if env is not None:
         fallbacks = [m.strip() for m in env.split(",") if m.strip()]
     elif primary == "gemini-3.1-flash-lite":
-        fallbacks = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]
+        # Every AI Studio model has its OWN RPM/TPM/RPD pools, and free-tier
+        # keys get real caps on all of them (15-sep dashboard: the lite
+        # families at 0 usage while 3.1-flash-lite was pinned). Cheapest
+        # first; add/remove freely via the env var.
+        fallbacks = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite",
+                     "gemini-3-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
     else:
         fallbacks = []
     chain = [primary]
@@ -487,6 +492,13 @@ def _model_chain(primary: str):
 # hammer. Prod 15-sep-2026: 3.1-flash-lite pinned at 6/15 RPM while
 # 3.5-flash-lite sat at zero — one jammed model must never stall a job.
 _MODEL_COOLDOWN_S = int(os.environ.get("GEMINI_MODEL_COOLDOWN_S", "600"))
+# 429 RESOURCE_EXHAUSTED is not a spike: on the per-minute pools it returns
+# in ~60s, but a tripped DAILY (RPD) pool only resets at midnight Pacific.
+# Backing off an exhausted model for the standard 10 minutes would let one
+# big job grind the whole chain's day away, minutes at a time; an hour means
+# "this model is spent today" while a wrongly-called exhaustion still
+# recovers on the next hour.
+_EXHAUSTED_COOLDOWN_S = int(os.environ.get("GEMINI_MODEL_EXHAUSTED_COOLDOWN_S", "3600"))
 _model_block_until: dict = {}
 
 
@@ -549,11 +561,13 @@ def generate_with_capacity_chain(client, model_name, *, contents, config=None,
                          f"(model={model}, attempt {attempt}/{attempts}), "
                          f"retrying in {wait:.0f}s: {msg[:150]}")
                     sleep(wait)
-        _model_block_until[model] = now() + _MODEL_COOLDOWN_S
+        cooled_for = (_EXHAUSTED_COOLDOWN_S if 'RESOURCE_EXHAUSTED' in str(last)
+                      else _MODEL_COOLDOWN_S)
+        _model_block_until[model] = now() + cooled_for
         nxt = [m for m in chain if m != model]
         _log(f"♻️ Gemini {model} out of capacity after {attempts} tries"
              f"{f' [{where}]' if where else ''}; cooling it for "
-             f"{_MODEL_COOLDOWN_S // 60} min" +
+             f"{cooled_for // 60} min" +
              (f", falling through to {nxt[0]}" if nxt else "") + f": {str(last)[:120]}")
     raise last
 

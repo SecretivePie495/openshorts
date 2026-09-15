@@ -138,6 +138,23 @@ class TestChain:
         assert state["slept"] == [10.0]
         assert state["models"] == ["gemini-sibling"]
 
+    def test_daily_exhaustion_cools_for_an_hour_not_ten_minutes(self, monkeypatch):
+        """429 RESOURCE_EXHAUSTED means the daily (RPD) pool is spent until
+        midnight Pacific; re-trying it after 10 min burns the whole chain's
+        day away, minutes at a time."""
+        monkeypatch.delenv("GEMINI_MODEL_FALLBACKS", raising=False)
+        monkeypatch.setenv("GEMINI_STAGE_RETRIES", "1")
+        client, state, sleep = _client(
+            lambda n, m: RuntimeError("429 RESOURCE_EXHAUSTED Quota exceeded"))
+        fake = {"t": 0.0}
+        with pytest.raises(RuntimeError):
+            gemini_worker.generate_with_capacity_chain(
+                client, "gemini-3-pro-exclusive", contents="p", sleep=sleep,
+                now=lambda: fake["t"])
+        assert fake["t"] == 0.0
+        until = gemini_worker._model_block_until["gemini-3-pro-exclusive"]
+        assert until == gemini_worker._EXHAUSTED_COOLDOWN_S == 3600
+
     def test_cooldown_expires(self, monkeypatch):
         monkeypatch.setenv("GEMINI_STAGE_RETRIES", "1")
         monkeypatch.setenv("GEMINI_MODEL_FALLBACKS", "")
@@ -158,18 +175,22 @@ class TestChain:
 
 
     def test_default_chain_for_the_pipeline_model(self, monkeypatch):
-        """3.1-flash-lite -> 3.5-flash-lite -> 2.5-flash-lite (quota pools
-        are per model; the -latest alias shares the jammed one)."""
+        """Free AI Studio caps are PER MODEL, and the dashboard (15-sep)
+        showed four text models at 0 usage while 3.1-flash-lite was pinned:
+        the default chain is the whole unused lineup, cheapest tier first."""
         monkeypatch.delenv("GEMINI_MODEL_FALLBACKS", raising=False)
         monkeypatch.setenv("GEMINI_STAGE_RETRIES", "1")
-        dead = {"gemini-3.1-flash-lite", "gemini-3.5-flash-lite"}
+        dead = {"gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+                "gemini-2.5-flash-lite"}
         client, state, sleep = _client(_boom(0, dead))
         out, winner = gemini_worker.generate_with_capacity_chain(
             client, "gemini-3.1-flash-lite", contents="p", sleep=sleep)
-        assert winner == "gemini-2.5-flash-lite"
-        assert state["models"] == ["gemini-3.1-flash-lite",
-                                   "gemini-3.5-flash-lite",
-                                   "gemini-2.5-flash-lite"]
+        assert winner == "gemini-3-flash"
+        assert gemini_worker._model_chain("gemini-3.1-flash-lite") == [
+            "gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite", "gemini-3-flash", "gemini-3.5-flash",
+            "gemini-2.5-flash",
+        ]
 
     def test_custom_primary_gets_no_surprise_default(self, monkeypatch):
         monkeypatch.delenv("GEMINI_MODEL_FALLBACKS", raising=False)
