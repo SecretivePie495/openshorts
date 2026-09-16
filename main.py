@@ -1724,9 +1724,13 @@ def get_viral_clips(transcript_result, video_duration):
             return [{"id": w["id"], "start": w["start"], "end": w["end"], "text": w["text"]} for w in ws]
 
         def _score_prompt(ws):
-            return gemini_worker.SCORE_PROMPT_TEMPLATE.format(
+            prompt = gemini_worker.SCORE_PROMPT_TEMPLATE.format(
                 video_duration=video_duration, language=language,
                 windows_json=json.dumps(_payload(ws), ensure_ascii=False))
+            if campaign_brief:
+                from campaign.scoring import apply_campaign_to_prompts
+                prompt, _ = apply_campaign_to_prompts(campaign_brief, prompt, "")
+            return prompt
 
         for b in range(0, len(windows), SCORE_BATCH):
             scored.extend(_run_stage_split(
@@ -1749,11 +1753,15 @@ def get_viral_clips(transcript_result, video_duration):
         def _detail_prompt(ws):
             # A split batch keeps the full clip-count band: a short list can
             # still hold the best clips, and the model returns fewer anyway.
-            return gemini_worker.DETAIL_PROMPT_TEMPLATE.format(
+            prompt = gemini_worker.DETAIL_PROMPT_TEMPLATE.format(
                 video_duration=video_duration, language=language,
                 min_clips=min_clips, max_clips=max_clips,
                 min_secs=min_secs, max_secs=max_secs,
                 windows_json=json.dumps(_payload(ws), ensure_ascii=False))
+            if campaign_brief:
+                from campaign.scoring import apply_campaign_to_prompts
+                _, prompt = apply_campaign_to_prompts(campaign_brief, "", prompt)
+            return prompt
 
         shorts = _run_stage_split(client, model_name, shortlist, _detail_prompt,
                                   gemini_worker.DetailResponse, "shorts", costs, "detail")
@@ -1924,9 +1932,21 @@ if __name__ == '__main__':
                              "square (1:1), letterbox (16:9 boxed into 9:16 with black bars).")
     parser.add_argument('--transcript', type=str,
                         help="Path to a precomputed transcript JSON (transcribe_media shape); skips transcription.")
+    parser.add_argument('--campaign-brief', type=str, default=None,
+                        help="Path to a campaign brief file (.docx / .txt / .json) or raw brief text. "
+                             "Injects clipping rules, forbidden moments, and required hashtags.")
 
     args = parser.parse_args()
     output_format = args.format
+
+    campaign_brief = None
+    if args.campaign_brief:
+        try:
+            from campaign import load_brief
+            campaign_brief = load_brief(args.campaign_brief)
+            print(f"📋 Campaign: {campaign_brief.name} ({len(campaign_brief.dont_list)} rules)")
+        except Exception as e:
+            print(f"⚠️ Campaign brief load failed: {e}")
 
     script_start_time = time.time()
     
@@ -2084,6 +2104,32 @@ if __name__ == '__main__':
             # --keep-original) or in uploads/ (upload jobs).
             clips_data['source_video'] = os.path.basename(input_video)
             clips_data['output_format'] = output_format
+
+            # Campaign: generate compliant captions + compliance check per clip.
+            if campaign_brief:
+                from campaign.captions import generate_campaign_caption
+                from campaign.compliance import check_clip_compliance
+                print(f"📋 Applying campaign rules: {campaign_brief.name}")
+                for i, clip in enumerate(clips_data.get('shorts', [])):
+                    clip['campaign_caption'] = generate_campaign_caption(clip, campaign_brief)
+                    result = check_clip_compliance(clip, campaign_brief,
+                                                   caption=clip.get('campaign_caption', ''),
+                                                   clip_index=i)
+                    clip['campaign_compliance'] = {
+                        'passed': result.passed,
+                        'warnings': result.warnings,
+                        'errors': result.errors,
+                    }
+                    if result.errors:
+                        print(f"   ⚠️ Clip {i+1} compliance: {', '.join(result.errors)}")
+                    elif result.warnings:
+                        print(f"   ℹ️ Clip {i+1} compliance warnings: {', '.join(result.warnings)}")
+                clips_data['campaign'] = {
+                    'name': campaign_brief.name,
+                    'client': campaign_brief.client,
+                    'hashtags': campaign_brief.hashtag_order,
+                }
+
             metadata_file = os.path.join(output_dir, f"{video_title}_metadata.json")
             with open(metadata_file, 'w') as f:
                 json.dump(clips_data, f, indent=2)

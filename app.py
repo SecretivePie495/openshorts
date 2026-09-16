@@ -2242,6 +2242,7 @@ async def process_endpoint(
     thumbnail_session_id: Optional[str] = Form(None),
     captions: Optional[str] = Form(None),
     upload_id: Optional[str] = Form(None),
+    campaign_brief: Optional[str] = Form(None),
 ):
     api_key = await resolve_gemini(request)
     if not api_key and not (llm_backend.active() and not BILLING_ENABLED):
@@ -2276,6 +2277,7 @@ async def process_endpoint(
         thumbnail_session_id = body.get("thumbnail_session_id")
         captions = body.get("captions")
         upload_id = body.get("upload_id")
+        campaign_brief = body.get("campaign_brief")
 
     # Normalize output format (auto = keep pipeline default).
     if output_format not in ("vertical", "horizontal", "square", "letterbox"):
@@ -2519,6 +2521,14 @@ async def process_endpoint(
     cmd.extend(["-o", job_output_dir])
     if output_format and output_format != "auto":
         cmd.extend(["--format", output_format])
+
+    # Campaign clipping: write brief to a temp file and pass it to main.py.
+    if campaign_brief:
+        brief_path = os.path.join(job_output_dir, "campaign_brief.txt")
+        with open(brief_path, "w", encoding="utf-8") as f:
+            f.write(campaign_brief if isinstance(campaign_brief, str) else str(campaign_brief))
+        cmd.extend(["--campaign-brief", brief_path])
+        print(f"[campaign] job={job_id} brief={brief_path}")
 
     print(f"[attestation] job={job_id} ip={attestation['ip']} source={attestation['source']} ack=true")
 
