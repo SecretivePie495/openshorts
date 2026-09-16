@@ -1933,6 +1933,32 @@ def enqueue_output(out, job_id):
     finally:
         out.close()
 
+def _exit_reason(returncode: int) -> str:
+    """What actually happened to the job process.
+
+    A negative code is a signal, not a failure the job chose, and "exit code
+    -9" told nobody anything: SIGKILL is not something main.py can do to
+    itself. It is nearly always the OOM killer, and the reason it finds this
+    process is structural — every job is its own main.py, loading its own
+    transcription model, so MAX_CONCURRENT_JOBS of them stack that many copies
+    of it. The in-process ASR gate cannot see the other jobs' processes.
+    """
+    if returncode >= 0:
+        return f"Process failed with exit code {returncode}"
+    try:
+        name = signal.Signals(-returncode).name
+    except ValueError:
+        name = f"signal {-returncode}"
+    if returncode == -9:
+        return (
+            "Process was killed (SIGKILL) — almost always the out-of-memory "
+            f"killer. Each job loads its own models, so MAX_CONCURRENT_JOBS="
+            f"{MAX_CONCURRENT_JOBS} of them run at once; lower it, or give the "
+            "container more memory. Check `dmesg` / the host's OOM log to "
+            "confirm.")
+    return f"Process was killed by {name} ({returncode})"
+
+
 async def _kill_job_process(process):
     """SIGTERM the job's whole process group, then SIGKILL what survives.
 
@@ -2084,7 +2110,7 @@ async def run_job(job_id, job_data):
                  jobs[job_id]['logs'].append("No metadata file generated.")
         else:
             jobs[job_id]['status'] = 'failed'
-            jobs[job_id]['logs'].append(_scrub_secrets(f"Process failed with exit code {returncode}"))
+            jobs[job_id]['logs'].append(_scrub_secrets(_exit_reason(returncode)))
             
     except Exception as e:
         jobs[job_id]['status'] = 'failed'
