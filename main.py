@@ -2147,7 +2147,8 @@ if __name__ == '__main__':
             # on a 16-core container were measured (Mac, 15-sep) finishing
             # serially because they fought each other for cores, and
             # ffmpeg_utils splits the remaining threads across the pool.
-            from ffmpeg_utils import nvenc_available, set_concurrent_workers
+            from ffmpeg_utils import (CLIP_WORKER_MEMORY_MB, memory_allowance_mb,
+                                      nvenc_available, set_concurrent_workers)
             _cw = os.environ.get("CLIP_WORKERS", "").strip()
             if _cw:
                 clip_workers = max(int(_cw), 1)
@@ -2160,6 +2161,19 @@ if __name__ == '__main__':
                 except (AttributeError, OSError):
                     _cores = os.cpu_count() or 4
                 clip_workers = max(1, min(3, _cores // 6))
+            # Cores say how fast the pool can go; memory says whether it gets
+            # to finish. A container with plenty of cores and little RAM sized
+            # itself at 3, started three 1080x1920 encodes and was SIGKILLed
+            # mid-render — which surfaces only as "exit code -9", nowhere near
+            # the decision that caused it. An explicit CLIP_WORKERS stays law.
+            _mem_mb = 0 if _cw else memory_allowance_mb()
+            if _mem_mb:
+                _by_memory = max(1, _mem_mb // CLIP_WORKER_MEMORY_MB)
+                if _by_memory < clip_workers:
+                    print(f"   ⚠️ Clip pool capped at {_by_memory} by memory: "
+                          f"{_mem_mb} MB available, ~{CLIP_WORKER_MEMORY_MB} MB "
+                          f"per worker (CLIP_WORKER_MEMORY_MB).")
+                    clip_workers = _by_memory
             set_concurrent_workers(clip_workers)
             print(f"   ⚙️ Clip pool: {clip_workers} worker(s) "
                   f"({'nvenc' if nvenc_available() else 'x264'})")

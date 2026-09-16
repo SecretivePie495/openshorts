@@ -224,6 +224,51 @@ def _cpu_allowance():
     return os.cpu_count() or 4
 
 
+# Rough peak footprint of one 1080x1920 encode worker plus its share of the
+# pipeline around it. Deliberately generous and overridable: the real number
+# depends on the filter chain a given clip needs, and the one that matters is
+# whichever keeps the OOM killer from choosing this process.
+CLIP_WORKER_MEMORY_MB = int(os.environ.get("CLIP_WORKER_MEMORY_MB", "1500"))
+
+
+def memory_allowance_mb():
+    """The container's memory ceiling in MB, or 0 when it cannot be read.
+
+    The companion to _cpu_allowance, and for the same reason: sizing from the
+    CONTAINER's allowance rather than the host's. Cores decide how fast the
+    clip pool can go but not whether it gets to finish — a container sized
+    wide but not deep will happily start three 1080x1920 encodes and be
+    SIGKILLed partway through.
+
+    0 means unknown, and the caller should not cap on a guess.
+    """
+    try:
+        # cgroup v2 (docker/Coolify): a byte count, or "max" for unlimited.
+        with open("/sys/fs/cgroup/memory.max") as fh:
+            raw = fh.read().strip()
+        if raw != "max":
+            return max(1, int(raw) // (1024 * 1024))
+    except Exception:
+        pass
+    try:
+        # cgroup v1: unlimited is a number near 2**63 rather than a word.
+        with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as fh:
+            value = int(fh.read())
+        if value < (1 << 62):
+            return max(1, value // (1024 * 1024))
+    except Exception:
+        pass
+    try:
+        # Not containerised: what the kernel says is free right now.
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return max(1, int(line.split()[1]) // 1024)
+    except Exception:
+        pass
+    return 0
+
+
 def _thread_budget():
     return max(2, (_cpu_budget or os.cpu_count() or 4) // _worker_budget)
 
