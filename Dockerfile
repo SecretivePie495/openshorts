@@ -75,6 +75,13 @@ ENV BGUTIL_SCRIPT_PATH=/opt/bgutil-provider/server/build/generate_once.js
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
+# Every entry point here prints emoji in its progress output, and Python picks
+# stdout's encoding from the locale — which in a slim image, or on a Windows
+# console, is not UTF-8. The first 🤖 then raises UnicodeEncodeError and takes
+# the process with it. app.py, subtitles.py and gemini_worker.py each grew
+# their own reconfigure() block after being bitten; main.py and saasshorts.py
+# never did. Setting it here covers all of them, subprocesses included.
+ENV PYTHONIOENCODING=utf-8
 
 # GPU runtime wiring — harmless no-ops on CPU builds / hosts without the
 # NVIDIA runtime. LD_LIBRARY_PATH points at the pip-installed CUDA libs

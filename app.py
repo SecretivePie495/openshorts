@@ -1967,7 +1967,12 @@ async def run_job(job_id, job_data):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, # Merge stderr to stdout
-            env=env,
+            # main.py prints emoji and its stdout here is a pipe, so Python
+            # takes the encoding from the locale rather than the terminal —
+            # cp1252 on a Windows host, ASCII under a bare C locale. Either
+            # kills the job on its first progress line. The image sets this
+            # too; this covers running the API outside it.
+            env={**env, "PYTHONIOENCODING": "utf-8"},
             cwd=os.getcwd(),
             # Own process group so the watchdog below can stop the ffmpeg
             # children too, not just main.py.
