@@ -288,7 +288,11 @@ async def save_project_state(job_id: str, request: Request):
 
 @router.get("/api/history")
 async def history(request: Request):
-    """List the signed-in user's saved videos with private, time-limited links."""
+    """List the signed-in user's saved videos with per-object links.
+
+    Private and time-limited only while R2_PUBLIC_BASE is unset; with it set
+    these are permanent public URLs (see storage.presigned_get).
+    """
     user = await get_current_user_required(request)
     async with database.session() as s:
         vids = list((await s.execute(
