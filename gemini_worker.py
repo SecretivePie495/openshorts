@@ -458,6 +458,14 @@ def _is_transient(msg: str) -> bool:
     return any(tok in msg for tok in _TRANSIENT_TOKENS)
 
 
+# Every AI Studio text model this pipeline can run on, cheapest/largest-cap
+# first. Free-tier caps are per model (lite: 500/day; flash: 20/day), so a
+# chain across all of them is ~1600 calls/day before billing matters.
+_CAPACITY_POOL = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+                  "gemini-2.5-flash-lite", "gemini-3-flash",
+                  "gemini-3.5-flash", "gemini-2.5-flash"]
+
+
 def _model_chain(primary: str):
     """Primary + siblings with their own capacity pools. Google's limits are
     PER MODEL (RPM/TPM/RPD each), so the -latest alias of a jammed primary
@@ -470,13 +478,14 @@ def _model_chain(primary: str):
     env = os.environ.get("GEMINI_MODEL_FALLBACKS")
     if env is not None:
         fallbacks = [m.strip() for m in env.split(",") if m.strip()]
-    elif primary == "gemini-3.1-flash-lite":
-        # Every AI Studio model has its OWN RPM/TPM/RPD pools, and free-tier
-        # keys get real caps on all of them (15-sep dashboard: the lite
-        # families at 0 usage while 3.1-flash-lite was pinned). Cheapest
-        # first; add/remove freely via the env var.
-        fallbacks = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite",
-                     "gemini-3-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+    elif primary in _CAPACITY_POOL:
+        # Any pool member as primary chains to the REST of the pool, lite
+        # tiers first (bigger daily caps). The pool is keyed by model, not
+        # by one blessed primary, because deployments set GEMINI_MODEL
+        # freely: Railway shipped GEMINI_MODEL=gemini-2.5-flash (20 calls/
+        # day!) and the old single-primary rule gave it no siblings, so a
+        # spent daily pool meant 12 retries against a wall (16-sep).
+        fallbacks = [m for m in _CAPACITY_POOL if m != primary]
     else:
         fallbacks = []
     chain = [primary]

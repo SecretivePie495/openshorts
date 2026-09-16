@@ -192,6 +192,17 @@ class TestChain:
             "gemini-2.5-flash",
         ]
 
+    def test_a_small_primary_still_chains_to_the_big_pools(self, monkeypatch):
+        """The Railway config bug (GEMINI_MODEL=gemini-2.5-flash, a 20/day
+        model) must no longer mean 'no fallbacks': every pool member chains
+        to the rest, lite tiers first."""
+        monkeypatch.delenv("GEMINI_MODEL_FALLBACKS", raising=False)
+        chain = gemini_worker._model_chain("gemini-2.5-flash")
+        assert chain[0] == "gemini-2.5-flash"
+        assert chain[1:] == ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+                             "gemini-2.5-flash-lite", "gemini-3-flash",
+                             "gemini-3.5-flash"]
+
     def test_custom_primary_gets_no_surprise_default(self, monkeypatch):
         monkeypatch.delenv("GEMINI_MODEL_FALLBACKS", raising=False)
         client, state, sleep = _client(
