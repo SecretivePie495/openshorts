@@ -396,18 +396,23 @@ function App() {
     setRenderQueue((q) => ({ ...q, [index]: { state: 'queued' } }));
   };
 
+  const renderAppliedRef = useRef(new Set());
+
   useEffect(() => {
     if (!jobId) return undefined;
+    const appliedRef = renderAppliedRef;
     const active = Object.entries(renderQueue)
       .filter(([, r]) => r.state === 'queued' || r.state === 'running');
     if (!active.length) return undefined;
     let cancelled = false;
     const tick = async () => {
-      for (const [idx, rec] of active) {
+      for (const [idx] of active) {
         try {
           const st = await apiJson(`/api/clip/${jobId}/${idx}/render-status`);
           if (cancelled) return;
           if (st.state === 'done') {
+            if (appliedRef.current.has(`${idx}:${st.render_id}`)) continue;
+            appliedRef.current.add(`${idx}:${st.render_id}`);
             handleClipRerendered(Number(idx), st.result);
             setRenderQueue((q) => ({ ...q, [idx]: { state: 'flashed' } }));
             setTimeout(() => setRenderQueue((q) => {
@@ -419,7 +424,13 @@ function App() {
               const n = { ...q }; delete n[idx]; return n;
             }), 20000);
           } else if (st.state !== 'idle') {
-            setRenderQueue((q) => ({ ...q, [idx]: { ...rec, state: st.state } }));
+            // Identity guard: a fresh object for an unchanged state re-fires
+            // this effect (renderQueue is its dep), which restarts the
+            // interval, which polls again instantly — the App re-rendered
+            // at network speed and every card video flickered black
+            // (16-sep: the queue's own poll was the "screen goes black" bug).
+            setRenderQueue((q) => (q[idx]?.state === st.state && q[idx]?.error === st.error
+                ? q : { ...q, [idx]: { ...q[idx], state: st.state, error: st.error } }));
           }
         } catch { /* transient poll failure: next tick retries */ }
       }
@@ -427,6 +438,7 @@ function App() {
     tick();
     const t = setInterval(tick, 4000);
     return () => { cancelled = true; clearInterval(t); };
+    // eslint rule rationale below; jobId changing re-seeds everything.
     // handleClipRerendered is a fresh closure every render (it writes to
     // several states); adding it as a dep would re-create the interval on
     // every parent render. The queue state is the only real trigger.
