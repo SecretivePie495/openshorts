@@ -59,7 +59,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
 
 # Helper token provider, baked in as a local Node script (no separate service).
-RUN git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider /opt/bgutil-provider \
+# Pinned: cloning master put whatever upstream pushed next straight into the
+# next image, unreviewed, with no way to tell which build got what. 2.0.0 is
+# what master resolved to when this was pinned, so it changed nothing — bump it
+# deliberately, and keep it in step with the pip plugin installed below.
+ARG BGUTIL_REF=2.0.0
+RUN git clone --depth 1 --branch "${BGUTIL_REF}" https://github.com/Brainicism/bgutil-ytdlp-pot-provider /opt/bgutil-provider \
     && cd /opt/bgutil-provider/server \
     && npm install --no-audit --no-fund \
     && npx tsc \

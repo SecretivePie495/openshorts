@@ -51,6 +51,23 @@ def delete_key(key):
     client().delete_object(Bucket=settings.r2_bucket, Key=key)
 
 
+def delete_keys(keys) -> int:
+    """Delete an arbitrary list of keys, 1000 per call.
+
+    ``delete_prefix`` has always batched; deleting a handful of named keys did
+    not, so a free-tier sweep spent one R2 round-trip per clip.
+    """
+    keys = [k for k in keys if k]
+    deleted = 0
+    c = client()
+    for i in range(0, len(keys), 1000):
+        chunk = keys[i:i + 1000]
+        c.delete_objects(Bucket=settings.r2_bucket,
+                         Delete={"Objects": [{"Key": k} for k in chunk]})
+        deleted += len(chunk)
+    return deleted
+
+
 def list_keys(prefix) -> list:
     """List every object key under a prefix."""
     c = client()
