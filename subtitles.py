@@ -573,7 +573,8 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
     ]
 
     _log(f"🎬 Burning subtitles: {' '.join(cmd)}")
-    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, timeout=1800)
 
     if result.returncode != 0:
         stderr_text = result.stderr.decode(errors='replace')

@@ -287,9 +287,14 @@ class Settings:
         fixes that and puts the bytes on Cloudflare's network instead of a single
         long path out of Hetzner (measured to the same client: 90 KB/s).
 
-        Objects under it are public. That matches the capability model already in
-        production for /videos/{job_id}/... (unauthenticated, the UUID is the
-        capability); anything stricter needs a Worker checking a signed token.
+        Objects under it are public: the URL never expires and proves nothing,
+        so anyone it reaches keeps that clip forever. This was justified by
+        /videos/{job_id}/... being unauthenticated too — that is no longer
+        true (media_auth now checks ownership there), so this is the last
+        place a leaked link still hands over a user's video. Closing it needs
+        a private bucket and a Worker checking a signed token; presigning in
+        storage.py cannot do it, because the edge serves these objects to
+        anyone who knows the key.
         """
         return os.environ.get("R2_PUBLIC_BASE", "").strip().rstrip("/")
 

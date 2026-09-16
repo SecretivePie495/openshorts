@@ -7,8 +7,8 @@ and `<title>_metadata.json`, which carries the full transcript of their video.
 All four were verified served, unauthenticated, against production on
 7-sep-2026. media_auth shipped the allowlist in 96f0139 but nothing imported it.
 
-This is the path half only: the clips and the untouched source video in the
-same directory are still public to whoever has the job id.
+This is the path half: WHAT kind of file may leave. Who may have it is
+test_media_tenant_isolation.py.
 """
 import pytest
 

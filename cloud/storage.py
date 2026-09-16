@@ -1,8 +1,10 @@
 """Cloudflare R2 (S3-compatible) storage for the users' durable video library.
 
 Layout: users/<user_id>/<job_id>/<filename>. Presigned URLs give private,
-time-limited view/download links. Delete-by-prefix wipes a user's whole library
-when their subscription's grace period ends.
+time-limited view/download links — but only while R2_PUBLIC_BASE is unset; see
+``presigned_get``, which hands back a permanent public URL when it is set.
+Delete-by-prefix wipes a user's whole library when their subscription's grace
+period ends.
 """
 from urllib.parse import quote
 
@@ -49,6 +51,23 @@ def delete_key(key):
     client().delete_object(Bucket=settings.r2_bucket, Key=key)
 
 
+def delete_keys(keys) -> int:
+    """Delete an arbitrary list of keys, 1000 per call.
+
+    ``delete_prefix`` has always batched; deleting a handful of named keys did
+    not, so a free-tier sweep spent one R2 round-trip per clip.
+    """
+    keys = [k for k in keys if k]
+    deleted = 0
+    c = client()
+    for i in range(0, len(keys), 1000):
+        chunk = keys[i:i + 1000]
+        c.delete_objects(Bucket=settings.r2_bucket,
+                         Delete={"Objects": [{"Key": k} for k in chunk]})
+        deleted += len(chunk)
+    return deleted
+
+
 def list_keys(prefix) -> list:
     """List every object key under a prefix."""
     c = client()
@@ -75,6 +94,13 @@ def presigned_get(key, expires=3600, download_name=None) -> str:
     cannot reliably fetch (see settings.r2_public_base). The custom domain has no
     equivalent of ResponseContentDisposition, so a download keeps the object's
     own name, which is already the clip filename.
+
+    The public-base branch returns a link that never expires and proves
+    nothing, so ``expires`` is silently ignored and callers promising a
+    "time-limited" link are wrong whenever it is set. Objects under that
+    domain are public at the edge, so signing here would not help: closing it
+    means a private bucket plus a Cloudflare Worker checking a token, not a
+    change in this function.
     """
     base = settings.r2_public_base
     if base:

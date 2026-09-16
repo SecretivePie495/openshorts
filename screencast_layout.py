@@ -28,7 +28,6 @@ What is different here is the question asked and what the answer is used for.
 Off by default (``SCREENCAST_LAYOUT=1``). Needs GEMINI_API_KEY; without one it
 is a silent no-op, like every other optional Gemini path here.
 """
-import json
 import os
 import time
 
@@ -206,7 +205,7 @@ def detect_content_ranges(video_path, video_duration):
 
         # Capacity chain: see layout_picker — the except below degrades to
         # face-only routing, so a spike should be waited out, not accepted.
-        response = gemini_worker.generate_with_capacity_chain(
+        answer, _model = gemini_worker.generate_with_capacity_chain(
             client, model_name,
             contents=[file_upload,
                       gemini_worker.WIDE_CONTENT_PROMPT_TEMPLATE.format(
@@ -214,9 +213,9 @@ def detect_content_ranges(video_path, video_duration):
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=gemini_worker.WideContentResponse,
-            ), where="screencast")
-        gemini_worker.raise_if_blocked(response)
-        raw = (json.loads(response.text) or {}).get("ranges") or []
+            ), where="screencast",
+            validate=gemini_worker.parse_json_response)
+        raw = (answer or {}).get("ranges") or []
     except Exception as e:
         print(f"   ⚠️ On-screen check failed ({e}) — keeping face-only routing.")
         return []

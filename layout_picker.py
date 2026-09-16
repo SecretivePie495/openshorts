@@ -41,7 +41,6 @@ whole-video mode already has, at 2.2s per clip instead of ~15s.
 Off by default (``AUTO_LAYOUT=1``). A caller that already switched layouts on
 by hand wins: this only ever ADDS, so an explicit choice is never overridden.
 """
-import json
 import os
 
 # AUTO_LAYOUT=1 decides and applies. AUTO_LAYOUT=shadow decides, logs, and
@@ -159,15 +158,14 @@ def pick(video_path, video_duration):
                  for b in frames]
         # Capacity chain: a 503 spike on the primary must not quietly cost
         # the video its layout pick (the except below degrades to "none").
-        response = gemini_worker.generate_with_capacity_chain(
+        answer, _model = gemini_worker.generate_with_capacity_chain(
             client, model_name,
             contents=parts + [gemini_worker.LAYOUT_CHOICE_PROMPT],
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=gemini_worker.LayoutChoice,
-            ), where="layout")
-        gemini_worker.raise_if_blocked(response)
-        answer = json.loads(response.text) or {}
+            ), where="layout", validate=gemini_worker.parse_json_response)
+        answer = answer or {}
     except Exception as e:
         print(f"   ⚠️ Layout choice failed ({e}) — keeping the default layout.")
         return "none"

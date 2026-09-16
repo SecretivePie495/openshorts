@@ -47,9 +47,9 @@ class MagicLinkToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (
         Index("ix_magic_email_created", "email", "created_at"),
-        # NOTE: schema is create_all-only; on an existing DB this index must be
-        # applied by hand: CREATE INDEX IF NOT EXISTS ix_magic_ip_created
-        #   ON magic_link_tokens (request_ip, created_at);
+        # create_all only indexes tables it creates, so on a database that
+        # predates this index it arrives via _ADDITIVE_STATEMENTS in
+        # database.py rather than by someone remembering to run it.
         Index("ix_magic_ip_created", "request_ip", "created_at"),
     )
 

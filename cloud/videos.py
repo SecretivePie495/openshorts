@@ -288,7 +288,11 @@ async def save_project_state(job_id: str, request: Request):
 
 @router.get("/api/history")
 async def history(request: Request):
-    """List the signed-in user's saved videos with private, time-limited links."""
+    """List the signed-in user's saved videos with per-object links.
+
+    Private and time-limited only while R2_PUBLIC_BASE is unset; with it set
+    these are permanent public URLs (see storage.presigned_get).
+    """
     user = await get_current_user_required(request)
     async with database.session() as s:
         vids = list((await s.execute(
@@ -386,8 +390,9 @@ async def purge_free_expired():
             if not await metering.is_free_user(s, user_id):
                 continue
         try:
-            for v in items["videos"]:
-                await asyncio.to_thread(storage.delete_key, v.r2_key)
+            if items["videos"]:
+                await asyncio.to_thread(
+                    storage.delete_keys, [v.r2_key for v in items["videos"]])
             for p in items["projects"]:
                 # Delete everything under the job prefix, not just the metadata
                 # key: the archive also stores clean canonical clips (which have
@@ -395,8 +400,7 @@ async def purge_free_expired():
                 # otherwise leak as orphans.
                 try:
                     prefix = storage.job_key(user_id, p.job_id, "")
-                    for key in await asyncio.to_thread(storage.list_keys, prefix):
-                        await asyncio.to_thread(storage.delete_key, key)
+                    await asyncio.to_thread(storage.delete_prefix, prefix)
                 except Exception:
                     if p.metadata_r2_key:
                         await asyncio.to_thread(storage.delete_key, p.metadata_r2_key)

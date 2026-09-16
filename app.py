@@ -24,7 +24,6 @@ from typing import Any, Dict, Optional, List
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
@@ -92,6 +91,12 @@ for _stream in (sys.stdout, sys.stderr):
 # when BILLING_ENABLED is set. With the flag off, the app behaves exactly as the
 # self-hosted BYOK app does today (no extra dependencies required).
 BILLING_ENABLED = os.environ.get("BILLING_ENABLED", "").lower() in ("1", "true", "yes")
+
+# Ownership checks on the /videos and /thumbnails bytes (media_auth). Off by
+# default because it only works once the dashboard appends ?mt= to media URLs:
+# turning it on against an older frontend makes every player 404. Self-host is
+# unaffected either way — with BILLING off there are no tenants to separate.
+MEDIA_AUTH_ENABLED = os.environ.get("MEDIA_AUTH_ENABLED", "").lower() in ("1", "true", "yes")
 
 # Job/file retention (issue #46). Self-host defaults to 24h: the 1h sweep kept
 # deleting finished projects under users who never touched their env, and the
@@ -689,6 +694,11 @@ HEARTBEAT_STALE_AFTER = 60           # no heartbeat for this long = nobody has i
 RESUME_SCAN_INTERVAL = 30            # seconds between looks for stale manifests
 HANDOVER_CHECK_INTERVAL = 5          # seconds between looks at the marker
 DRAIN_TIMEOUT_SECONDS = int(os.environ.get("DRAIN_TIMEOUT_SECONDS", "840"))
+# Wall-clock ceiling for one job's subprocess. The per-step ffmpeg timeouts
+# cap each encode, but a job that wedges between them would otherwise hold
+# one of MAX_CONCURRENT_JOBS slots forever — a handful of those and the queue
+# stops moving for everyone. 0 disables the watchdog.
+JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "14400"))
 # After the jobs are drained, keep SERVING this long with /health/ready at 503
 # before closing the socket: the proxy only drops a container once its Docker
 # healthcheck has failed interval*retries times (15 s with the Coolify
@@ -1735,15 +1745,89 @@ app.add_middleware(
 # restoring it. Late-bound lambda: the restorer is defined further down.
 from restoring_static import RestoringStaticFiles
 import media_auth
+
+
+def _media_secret() -> str:
+    """The key both media token shapes are signed with, or "" when there is
+    nothing to protect (self-host has no tenants)."""
+    return cloud.settings.jwt_secret if (BILLING_ENABLED and cloud) else ""
+
+
+def _media_owner(kind: str, rel_path: str) -> Optional[str]:
+    """The uid owning this media path, or None when nobody has claimed it.
+
+    None means public, exactly as in ``_assert_job_owner``: BYOK, anonymous and
+    self-host jobs never stamp an owner, and refusing those would break the
+    self-host app that has no user to compare against.
+    """
+    first = rel_path.split("/", 1)[0]
+    if not first:
+        return None
+    if kind == "thumbnails":
+        record = thumbnail_sessions.get(first)
+        owner = record.get("user_id") if isinstance(record, dict) else None
+        return str(owner) if owner else None
+    record = jobs.get(first)
+    owner = record.get("user_id") if isinstance(record, dict) else None
+    if owner:
+        return str(owner)
+    # Restarts drop the in-memory record but leave the sidecar, and a job that
+    # survives a redeploy must not become public by surviving it.
+    try:
+        with open(os.path.join(OUTPUT_DIR, first, ".owner")) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+async def _media_authorized(kind: str, rel_path: str, scope) -> bool:
+    """Whether this request may have these bytes.
+
+    Three ways to prove it, because a ``<video src>`` cannot send a header:
+    the signed path capability handed to webhooks and MCP tools, the
+    dashboard's short-lived per-user token, and an ordinary Authorization /
+    X-API-Key header from an agent or curl.
+    """
+    if not (MEDIA_AUTH_ENABLED and BILLING_ENABLED):
+        return True
+    owner = _media_owner(kind, rel_path)
+    if owner is None:
+        return True
+    secret = _media_secret()
+    if not secret:
+        return True
+    request = Request(scope)
+    params = request.query_params
+
+    signed_path = media_auth.strip_media_prefix(f"/{kind}/{rel_path}")
+    if signed_path and params.get("sig") and media_auth.verify_path_signature(
+            signed_path, params.get("exp"), params.get("sig"), secret):
+        return True
+
+    token = params.get("mt")
+    if token and media_auth.verify_user_token(token, secret) == owner:
+        return True
+
+    user = await _user_from_request(request)
+    return user is not None and str(user.id) == owner
+
+
 app.mount("/videos", RestoringStaticFiles(
     directory=OUTPUT_DIR,
     guard=media_auth.is_servable,
+    authorizer=lambda rel, scope: _media_authorized("videos", rel, scope),
     restorer=lambda job_id: _restore_for_public_path(job_id)), name="videos")
 
-# Mount static files for serving thumbnails
+# Mount static files for serving thumbnails. Same two guards as /videos: this
+# mount served every file under its directory to anyone, and the face crops
+# under it are as much the user's as the clips are.
 THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
-app.mount("/thumbnails", StaticFiles(directory=THUMBNAILS_DIR), name="thumbnails")
+app.mount("/thumbnails", RestoringStaticFiles(
+    directory=THUMBNAILS_DIR,
+    guard=media_auth.is_servable,
+    authorizer=lambda rel, scope: _media_authorized("thumbnails", rel, scope),
+), name="thumbnails")
 
 
 def _safe_under(base_dir: str, user_rel_path: str) -> Optional[str]:
@@ -1849,6 +1933,50 @@ def enqueue_output(out, job_id):
     finally:
         out.close()
 
+def _exit_reason(returncode: int) -> str:
+    """What actually happened to the job process.
+
+    A negative code is a signal, not a failure the job chose, and "exit code
+    -9" told nobody anything: SIGKILL is not something main.py can do to
+    itself. It is nearly always the OOM killer, and the reason it finds this
+    process is structural — every job is its own main.py, loading its own
+    transcription model, so MAX_CONCURRENT_JOBS of them stack that many copies
+    of it. The in-process ASR gate cannot see the other jobs' processes.
+    """
+    if returncode >= 0:
+        return f"Process failed with exit code {returncode}"
+    try:
+        name = signal.Signals(-returncode).name
+    except ValueError:
+        name = f"signal {-returncode}"
+    if returncode == -9:
+        return (
+            "Process was killed (SIGKILL) — almost always the out-of-memory "
+            f"killer. Each job loads its own models, so MAX_CONCURRENT_JOBS="
+            f"{MAX_CONCURRENT_JOBS} of them run at once; lower it, or give the "
+            "container more memory. Check `dmesg` / the host's OOM log to "
+            "confirm.")
+    return f"Process was killed by {name} ({returncode})"
+
+
+async def _kill_job_process(process):
+    """SIGTERM the job's whole process group, then SIGKILL what survives.
+
+    main.py spawns ffmpeg children, so signalling just the direct child would
+    leave the encode running — still burning CPU and disk on a job nobody is
+    waiting for any more.
+    """
+    for sig, grace in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(os.getpgid(process.pid), sig)
+        except OSError:
+            return
+        for _ in range(grace):
+            await asyncio.sleep(1)
+            if process.poll() is not None:
+                return
+
+
 async def run_job(job_id, job_data):
     """Executes the subprocess for a specific job."""
     
@@ -1865,8 +1993,16 @@ async def run_job(job_id, job_data):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, # Merge stderr to stdout
-            env=env,
-            cwd=os.getcwd()
+            # main.py prints emoji and its stdout here is a pipe, so Python
+            # takes the encoding from the locale rather than the terminal —
+            # cp1252 on a Windows host, ASCII under a bare C locale. Either
+            # kills the job on its first progress line. The image sets this
+            # too; this covers running the API outside it.
+            env={**env, "PYTHONIOENCODING": "utf-8"},
+            cwd=os.getcwd(),
+            # Own process group so the watchdog below can stop the ffmpeg
+            # children too, not just main.py.
+            start_new_session=True,
         )
         
         # We need to capture logs in a thread because Popen isn't async
@@ -1879,6 +2015,10 @@ async def run_job(job_id, job_data):
         last_heartbeat = time.time()
         while process.poll() is None:
             await asyncio.sleep(2)
+            if JOB_TIMEOUT_SECONDS and time.time() - start_wait > JOB_TIMEOUT_SECONDS:
+                await _kill_job_process(process)
+                raise TimeoutError(
+                    f"Job exceeded the {JOB_TIMEOUT_SECONDS}s limit and was stopped.")
             if time.time() - last_heartbeat >= HEARTBEAT_EVERY:
                 _touch_manifest(job_id)
                 last_heartbeat = time.time()
@@ -1970,7 +2110,7 @@ async def run_job(job_id, job_data):
                  jobs[job_id]['logs'].append("No metadata file generated.")
         else:
             jobs[job_id]['status'] = 'failed'
-            jobs[job_id]['logs'].append(_scrub_secrets(f"Process failed with exit code {returncode}"))
+            jobs[job_id]['logs'].append(_scrub_secrets(_exit_reason(returncode)))
             
     except Exception as e:
         jobs[job_id]['status'] = 'failed'
@@ -2004,9 +2144,31 @@ async def get_config():
         "billingEnabled": BILLING_ENABLED,
         "googleAuthEnabled": bool(BILLING_ENABLED and cloud.settings.google_auth_enabled),
         "jobRetentionSeconds": JOB_RETENTION_SECONDS,
+        # Tells the dashboard whether media URLs need a ?mt= token appended.
+        "mediaAuthEnabled": bool(MEDIA_AUTH_ENABLED and BILLING_ENABLED),
         # Self-host only: tells the dashboard the Gemini key is optional
         # because the moment picker runs on an OpenAI-compatible server.
         "localLlm": None if BILLING_ENABLED else llm_backend.describe(),
+    }
+
+
+@app.get("/api/media-token")
+async def get_media_token(request: Request):
+    """Mint the short-lived bearer the dashboard puts in media URLs.
+
+    A ``<video src>`` cannot carry a header, so something has to travel in the
+    query string; this dies in hours rather than the session JWT's 30 days,
+    which is the whole point of not reusing that one.
+    """
+    user = await _user_from_request(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    secret = _media_secret()
+    if not secret:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {
+        "token": media_auth.mint_user_token(user.id, secret),
+        "expiresIn": media_auth.MEDIA_TOKEN_TTL_SECONDS,
     }
 
 async def _probe_youtube_quality(url: str) -> dict:
@@ -3922,6 +4084,14 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
 
 # --- Remotion Render Proxy ---
 RENDER_SERVICE_URL = os.getenv("RENDER_SERVICE_URL", "http://renderer:3100")
+# Shared secret with the render service. It renders whatever it is told to, so
+# reaching it is the whole exploit; unset means it accepts anyone who can open
+# a socket to it (it warns about that on boot).
+RENDER_AUTH_TOKEN = os.getenv("RENDER_AUTH_TOKEN", "")
+
+
+def _render_headers() -> dict:
+    return {"Authorization": f"Bearer {RENDER_AUTH_TOKEN}"} if RENDER_AUTH_TOKEN else {}
 
 @app.post("/api/render")
 async def proxy_render(request: Request):
@@ -3934,7 +4104,8 @@ async def proxy_render(request: Request):
         request, render_minutes, str(uuid.uuid4()), "render")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(f"{RENDER_SERVICE_URL}/render", json=body)
+            resp = await client.post(f"{RENDER_SERVICE_URL}/render", json=body,
+                                     headers=_render_headers())
         result = resp.json()
         if reservation_id:
             await _metering.commit_reservation(reservation_id)
@@ -3950,7 +4121,8 @@ async def proxy_render_status(render_id: str):
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_id}")
+            resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_id}",
+                                    headers=_render_headers())
             return resp.json()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Render service unavailable: {e}")

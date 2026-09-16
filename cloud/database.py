@@ -10,12 +10,18 @@ Base = declarative_base()
 _engine = None
 _sessionmaker = None
 
-# Columns added to tables that already exist in production. ADD COLUMN IF NOT
-# EXISTS is a no-op on a database that already has them and on a fresh one that
-# create_all just built.
-_ADDITIVE_COLUMNS = (
+# Schema changes for databases that already exist in production. Every one is
+# additive and idempotent, so it is a no-op both on a database that already has
+# it and on a fresh one create_all just built.
+_ADDITIVE_STATEMENTS = (
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
     "marketing_opt_out BOOLEAN NOT NULL DEFAULT false",
+    # create_all adds indexes only to tables it creates, so on any database
+    # predating this one the magic-link per-IP rate limiter was sequentially
+    # scanning a table that only grows — on every sign-in attempt. It used to
+    # say "apply this by hand" in a comment in models.py, which is not a plan.
+    "CREATE INDEX IF NOT EXISTS ix_magic_ip_created "
+    "ON magic_link_tokens (request_ip, created_at)",
 )
 
 
@@ -38,15 +44,19 @@ async def init_engine():
         # Case-insensitive email uniqueness.
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
         await conn.run_sync(Base.metadata.create_all)
-        # create_all creates missing TABLES and never ALTERs an existing one, so
-        # a column added to a model that already shipped exists in the code and
-        # not in the database. Each statement here is additive and idempotent;
-        # keep them that way, and prefer Alembic once one of them is not.
-        for statement in _ADDITIVE_COLUMNS:
-            try:
-                await conn.execute(text(statement))
-            except Exception as e:  # pragma: no cover - depends on the server
-                print(f"⚠️  Additive schema step failed ({statement}): {e}")
+
+    # Each in its own transaction, and each allowed to fail the boot.
+    #
+    # These used to run inside the create_all transaction with their errors
+    # caught and printed — which did not do what it looks like: on Postgres the
+    # first failure poisons the transaction, so every later statement failed
+    # too and the whole batch was silently skipped. Booting anyway just moves
+    # the failure to the first query against a column that isn't there, hours
+    # later and somewhere less obvious. Keep them additive and idempotent, and
+    # reach for Alembic the moment one of them isn't.
+    for statement in _ADDITIVE_STATEMENTS:
+        async with _engine.begin() as conn:
+            await conn.execute(text(statement))
 
 
 def get_sessionmaker():

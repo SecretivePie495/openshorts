@@ -285,6 +285,21 @@ def _agentledger_headers() -> dict:
     return {"Authorization": f"Bearer {settings.agentledger_api_key}"}
 
 
+_agentledger_http_client: httpx.AsyncClient | None = None
+
+
+def _agentledger_http() -> httpx.AsyncClient:
+    """One pooled client for AgentLedger.
+
+    A fresh AsyncClient per request put a TLS handshake in front of every
+    invoice page load; a kept-alive pool reuses the connection instead.
+    """
+    global _agentledger_http_client
+    if _agentledger_http_client is None or _agentledger_http_client.is_closed:
+        _agentledger_http_client = httpx.AsyncClient(timeout=30.0)
+    return _agentledger_http_client
+
+
 async def _agentledger_fetch_invoices(client: httpx.AsyncClient, customer_id: str) -> list[dict]:
     """Invoices for one Stripe customer. 404 = no contact yet → []."""
     r = await client.get(f"{settings.agentledger_api_url}/contacts/{customer_id}/invoices",
@@ -331,21 +346,21 @@ async def list_invoices(request: Request):
     if not customer_id:
         return {"invoices": []}
 
-    async with httpx.AsyncClient() as client:
-        try:
-            invoices = await _agentledger_fetch_invoices(client, customer_id)
-        except httpx.HTTPError:
-            raise HTTPException(status_code=502, detail="Invoice service unreachable")
-        if not invoices:
-            import time as _time
-            last = _agentledger_backfill_at.get(customer_id, 0.0)
-            if _time.time() - last > _AGENTLEDGER_BACKFILL_DEBOUNCE_S:
-                _agentledger_backfill_at[customer_id] = _time.time()
-                await _agentledger_backfill(client, customer_id)
-                try:
-                    invoices = await _agentledger_fetch_invoices(client, customer_id)
-                except httpx.HTTPError:
-                    invoices = []
+    client = _agentledger_http()
+    try:
+        invoices = await _agentledger_fetch_invoices(client, customer_id)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Invoice service unreachable")
+    if not invoices:
+        import time as _time
+        last = _agentledger_backfill_at.get(customer_id, 0.0)
+        if _time.time() - last > _AGENTLEDGER_BACKFILL_DEBOUNCE_S:
+            _agentledger_backfill_at[customer_id] = _time.time()
+            await _agentledger_backfill(client, customer_id)
+            try:
+                invoices = await _agentledger_fetch_invoices(client, customer_id)
+            except httpx.HTTPError:
+                invoices = []
     return {"invoices": invoices}
 
 

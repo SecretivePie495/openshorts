@@ -20,36 +20,29 @@ const SIZE_SCALE: Record<string, number> = {
   L: 1.3,
 };
 
+// Percentages must match hooks.py's overlay_y math (top 20% / bottom 70%),
+// or the preview drifts from what the server path renders.
 const POSITION_STYLE: Record<string, React.CSSProperties> = {
-  top: { top: "18%", bottom: "auto" },
+  top: { top: "20%", bottom: "auto" },
   center: { top: "50%", bottom: "auto", transform: "translateY(-50%)" },
-  bottom: { top: "68%", bottom: "auto" },
+  bottom: { top: "70%", bottom: "auto" },
 };
 
-// Must mirror hooks.py HOOK_STYLES so preview == burned output.
+// Must mirror hooks.py HOOK_STYLES (the server-side FFmpeg fallback).
 interface HookLook {
   box: string | null;
   text: string;
   outlinePx: number;
-  outlineColor: string;
   shadow: boolean;
 }
-const HOOK_LOOKS: Record<string, HookLook> = {
-  classic: { box: "rgba(255,255,255,0.94)", text: "#000000", outlinePx: 0, outlineColor: "#000", shadow: true },
-  dark: { box: "rgba(18,18,20,0.92)", text: "#FFFFFF", outlinePx: 0, outlineColor: "#000", shadow: true },
-  yellow: { box: "rgba(255,214,0,0.96)", text: "#000000", outlinePx: 0, outlineColor: "#000", shadow: true },
-  red: { box: "rgba(220,38,38,0.96)", text: "#FFFFFF", outlinePx: 0, outlineColor: "#000", shadow: true },
-  outline: { box: null, text: "#FFFFFF", outlinePx: 8, outlineColor: "#000000", shadow: false },
-  outline_yellow: { box: null, text: "#FFD600", outlinePx: 8, outlineColor: "#000000", shadow: false },
-};
 
-const textStroke = (px: number, color: string): string => {
-  if (!px) return "none";
-  const o: string[] = [];
-  for (let dx = -px; dx <= px; dx++)
-    for (let dy = -px; dy <= px; dy++)
-      if (dx || dy) o.push(`${dx}px ${dy}px 0 ${color}`);
-  return o.join(", ");
+const HOOK_LOOKS: Record<string, HookLook> = {
+  classic: { box: "rgba(255, 255, 255, 0.94)", text: "#000000", outlinePx: 0, shadow: true },
+  dark: { box: "rgba(18, 18, 20, 0.92)", text: "#FFFFFF", outlinePx: 0, shadow: true },
+  yellow: { box: "rgba(255, 214, 0, 0.96)", text: "#000000", outlinePx: 0, shadow: true },
+  red: { box: "rgba(220, 38, 38, 0.96)", text: "#FFFFFF", outlinePx: 0, shadow: true },
+  outline: { box: null, text: "#FFFFFF", outlinePx: 8, shadow: false },
+  outline_yellow: { box: null, text: "#FFD600", outlinePx: 8, shadow: false },
 };
 
 export const HookOverlay: React.FC<HookOverlayProps> = ({ config }) => {
@@ -123,28 +116,34 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
     });
   }
 
-  const positionStyle: React.CSSProperties =
-    config.xPct != null && config.yPct != null
-      ? {
-          left: `${config.xPct * 100}%`,
-          top: `${config.yPct * 100}%`,
-          right: "auto",
-          bottom: "auto",
-          transform: "translate(-50%, -50%)",
-        }
-      : POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
+  // Free position must NOT also carry the preset frame (left:0/right:0 +
+  // flex centering): a full-width box translated -50% jumps half off-screen
+  // the instant a drag starts — users read that as "dragging changes the
+  // format". The anchored point is the box CENTER, matching hooks.py's
+  // overlay math (x*W - box_w/2) and the DOM fallback preview.
+  const free = config.xPct != null && config.yPct != null;
+  const positionStyle: React.CSSProperties = free
+    ? {
+        left: `${config.xPct! * 100}%`,
+        top: `${config.yPct! * 100}%`,
+        right: "auto",
+        bottom: "auto",
+        width: "auto",
+        transform: "translate(-50%, -50%)",
+      }
+    : POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
   const look = HOOK_LOOKS[config.style ?? "classic"] ?? HOOK_LOOKS.classic;
 
   // Base font size: 5% of 1080 width (matches hooks.py logic)
   const baseFontSize = 1080 * 0.05;
   const fontSize = Math.round(baseFontSize * scale);
+  const outlinePx = Math.round(look.outlinePx * scale);
 
   return (
     <div
       style={{
         position: "absolute",
-        left: 0,
-        right: 0,
+        ...(free ? {} : { left: 0, right: 0 }),
         display: "flex",
         justifyContent: "center",
         ...positionStyle,
@@ -157,7 +156,7 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
           maxWidth: "90%",
           backgroundColor: look.box ?? "transparent",
           borderRadius: 20,
-          padding: look.box ? `${25 * scale}px ${30 * scale}px` : `${8 * scale}px ${12 * scale}px`,
+          padding: look.box ? `${25 * scale}px ${30 * scale}px` : 0,
           boxShadow: look.shadow ? "5px 5px 15px rgba(0, 0, 0, 0.25)" : "none",
           textAlign: "center",
         }}
@@ -170,7 +169,12 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
             color: look.text,
             lineHeight: 1.4,
             wordBreak: "break-word",
-            textShadow: textStroke(look.outlinePx, look.outlineColor),
+            ...(outlinePx > 0
+              ? {
+                  WebkitTextStroke: `${outlinePx}px #000000`,
+                  paintOrder: "stroke fill",
+                }
+              : {}),
           }}
         >
           {config.text}

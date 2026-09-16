@@ -1414,7 +1414,8 @@ def process_video_to_vertical(input_video, final_output_video, aspect_ratio=ASPE
     try:
         subprocess.run(
             ['ffmpeg', '-y', '-i', input_video, '-vn', '-c:a', 'copy', audio_track_path],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            timeout=1800)
     except subprocess.CalledProcessError:
         print("\n   ❌ Audio extraction failed (maybe no audio?). Proceeding without audio.")
 
@@ -1424,7 +1425,8 @@ def process_video_to_vertical(input_video, final_output_video, aspect_ratio=ASPE
         mux += ['-i', audio_track_path]
     mux += ['-c', 'copy', *METADATA_SCRUB, '-movflags', '+faststart', final_output_video]
     try:
-        subprocess.run(mux, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        subprocess.run(mux, check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, timeout=1800)
         print(f"   ✅ Clip saved to {final_output_video}")
     except subprocess.CalledProcessError as e:
         print("\n   ❌ Final merge failed.")
@@ -1595,24 +1597,12 @@ def _run_gemini_stage(client, model_name, prompt, schema):
 
     def _validate(response):
         box["resp"] = response
-        # Policy blocks are deterministic — the helper re-raises them without
-        # retrying; parsing happens per attempt so a 200-with-empty-body
-        # counts as one more try (prod 22-jul-2026).
-        return _parse_gemini_stage(response)
+        return gemini_worker.parse_json_response(response)
 
     parsed, winner = gemini_worker.generate_with_capacity_chain(
         client, model_name, contents=prompt, config=config, where="stage",
         validate=_validate)
     return parsed, gemini_worker._calculate_cost_analysis(box["resp"], winner)
-
-
-def _parse_gemini_stage(response):
-    gemini_worker.raise_if_blocked(response)
-    parsed_obj = getattr(response, "parsed", None)
-    if parsed_obj is not None:
-        return parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
-    return gemini_worker._parse_json_response_text(
-        gemini_worker._get_response_text(response))
 
 
 def _run_local_stage(prompt, schema, model_name):
@@ -2157,7 +2147,8 @@ if __name__ == '__main__':
             # on a 16-core container were measured (Mac, 15-sep) finishing
             # serially because they fought each other for cores, and
             # ffmpeg_utils splits the remaining threads across the pool.
-            from ffmpeg_utils import nvenc_available, set_concurrent_workers
+            from ffmpeg_utils import (CLIP_WORKER_MEMORY_MB, memory_allowance_mb,
+                                      nvenc_available, set_concurrent_workers)
             _cw = os.environ.get("CLIP_WORKERS", "").strip()
             if _cw:
                 clip_workers = max(int(_cw), 1)
@@ -2170,6 +2161,19 @@ if __name__ == '__main__':
                 except (AttributeError, OSError):
                     _cores = os.cpu_count() or 4
                 clip_workers = max(1, min(3, _cores // 6))
+            # Cores say how fast the pool can go; memory says whether it gets
+            # to finish. A container with plenty of cores and little RAM sized
+            # itself at 3, started three 1080x1920 encodes and was SIGKILLed
+            # mid-render — which surfaces only as "exit code -9", nowhere near
+            # the decision that caused it. An explicit CLIP_WORKERS stays law.
+            _mem_mb = 0 if _cw else memory_allowance_mb()
+            if _mem_mb:
+                _by_memory = max(1, _mem_mb // CLIP_WORKER_MEMORY_MB)
+                if _by_memory < clip_workers:
+                    print(f"   ⚠️ Clip pool capped at {_by_memory} by memory: "
+                          f"{_mem_mb} MB available, ~{CLIP_WORKER_MEMORY_MB} MB "
+                          f"per worker (CLIP_WORKER_MEMORY_MB).")
+                    clip_workers = _by_memory
             set_concurrent_workers(clip_workers)
             print(f"   ⚙️ Clip pool: {clip_workers} worker(s) "
                   f"({'nvenc' if nvenc_available() else 'x264'})")

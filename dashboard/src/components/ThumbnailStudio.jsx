@@ -310,6 +310,11 @@ export default function ThumbnailStudio({ geminiApiKey, uploadPostKey, uploadUse
   // the face upload nobody makes. Fetched once when the generate step opens.
   // `frames` is deliberately not a dependency: setting it inside the effect
   // would re-run it and the cleanup would discard the response in flight.
+  // Publishing polls a background job. Without this the interval outlives the
+  // component and keeps hitting the API after the user navigates away.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   const framesRequestedFor = useRef(null);
   useEffect(() => {
     if (step !== 2 || mode !== 'video' || !sessionId) return;
@@ -406,11 +411,22 @@ export default function ThumbnailStudio({ geminiApiKey, uploadPostKey, uploadUse
 
       const { publish_id } = await res.json();
 
-      // Poll for status every 2 seconds (upload can take minutes for large videos)
+      // Poll for status every 2 seconds (upload can take minutes for large
+      // videos), but never forever: a backend stuck in 'uploading' used to
+      // leave this promise unsettled and the button spinning for good.
+      const POLL_MS = 2000;
+      const DEADLINE_MS = 15 * 60 * 1000;
       await new Promise((resolve, reject) => {
+        const startedAt = Date.now();
         const interval = setInterval(async () => {
+          if (!mountedRef.current) { clearInterval(interval); resolve(); return; }
+          if (Date.now() - startedAt > DEADLINE_MS) {
+            clearInterval(interval);
+            reject(new Error('Upload is still running — check YouTube in a few minutes.'));
+            return;
+          }
           try {
-            const statusRes = await fetch(getApiUrl(`/api/thumbnail/publish/status/${publish_id}`));
+            const statusRes = await apiFetch(`/api/thumbnail/publish/status/${publish_id}`);
             if (!statusRes.ok) { clearInterval(interval); reject(new Error('Status check failed')); return; }
             const statusData = await statusRes.json();
 
@@ -427,7 +443,7 @@ export default function ThumbnailStudio({ geminiApiKey, uploadPostKey, uploadUse
             clearInterval(interval);
             reject(e);
           }
-        }, 2000);
+        }, POLL_MS);
       });
 
     } catch (e) {

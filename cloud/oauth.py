@@ -44,6 +44,25 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def email_is_verified(userinfo) -> bool:
+    """Whether Google actually vouches for this address.
+
+    False for a Workspace domain that allows unverified custom-domain
+    addresses, and false when the claim is missing. That distinction is the
+    whole account-takeover story: the callback below merges a Google login
+    into an existing magic-link account of the same address, so trusting an
+    address nobody verified means registering <victim>@<domain> at Google is
+    enough to walk into the victim's account.
+
+    Google sends a JSON boolean; the string form is accepted too because some
+    OIDC providers send it that way and being lenient about the shape costs
+    nothing. Anything else counts as unverified — an absent claim must fail
+    closed, not open.
+    """
+    claim = userinfo.get("email_verified")
+    return claim is True or str(claim).strip().lower() == "true"
+
+
 @router.get("/api/auth/google")
 async def google_login(request: Request):
     if oauth is None:
@@ -83,6 +102,12 @@ async def google_callback(request: Request):
     google_sub = userinfo.get("sub")
     if not email:
         return RedirectResponse(f"{settings.frontend_url}/#/auth/callback?error=noemail")
+    if not email_is_verified(userinfo):
+        # Before the lookup on purpose: an unproven address may neither merge
+        # into an existing account nor claim a new one (User.email is unique,
+        # so creating would also let an attacker squat a victim's address).
+        return RedirectResponse(
+            f"{settings.frontend_url}/#/auth/callback?error=unverified")
 
     async with database.session() as session:
         async with session.begin():

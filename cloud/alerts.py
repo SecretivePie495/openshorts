@@ -52,6 +52,11 @@ def _classify_failure(err: str) -> str:
     if "sign in to confirm" in e or "not a bot" in e or "http error 403" in e \
             or "http error 429" in e or "video unavailable" in e or "read timed out" in e:
         return "youtube download"
+    # Killed rather than failed. Worth its own category: it is a capacity
+    # problem, so it recurs on every job until someone changes the memory or
+    # the concurrency — and it used to land in "mixed" with no way to tell.
+    if "sigkill" in e or "out-of-memory" in e or "exit code -9" in e:
+        return "out of memory"
     if "whisper" in e or "faster_whisper" in e or "transcrib" in e or "av/container" in e:
         return "transcription"
     # User content rejected by the AI provider's policy filter — deterministic,
