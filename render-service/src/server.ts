@@ -1,8 +1,13 @@
+import crypto from "node:crypto";
+import path from "node:path";
+
 import express from "express";
+import type { NextFunction, Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { initBundle } from "./bundle.js";
 import { executeRender } from "./render-worker.js";
+import { resolveOutputUrl } from "./video-source.js";
 
 // --- Render status types ---
 
@@ -87,10 +92,38 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 
 const PORT = parseInt(process.env.PORT || "3100", 10);
-const OUTPUT_DIR = process.env.OUTPUT_DIR || "/output";
+const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || "/output");
+const AUTH_TOKEN = process.env.RENDER_AUTH_TOKEN || "";
 
-// Serve video files from the shared output volume so Remotion can access them via HTTP
-app.use("/output", express.static(OUTPUT_DIR));
+// This service renders whatever it is told to, so reaching it is the whole
+// exploit. Enforced only when a token is configured, so an existing deployment
+// keeps working — but main() shouts about it on every boot until it is set.
+function requireToken(req: Request, res: Response, next: NextFunction): void {
+  if (!AUTH_TOKEN) return next();
+  const header = req.get("authorization") || "";
+  const presented = Buffer.from(
+    header.startsWith("Bearer ") ? header.slice(7) : "");
+  const expected = Buffer.from(AUTH_TOKEN);
+  if (presented.length === expected.length &&
+      crypto.timingSafeEqual(presented, expected)) {
+    return next();
+  }
+  res.status(404).end();
+}
+
+// The rendered clips of every tenant sit on this volume, and a jobId is
+// guessable enough that serving it to the world was an ownership hole. The
+// only legitimate reader is the headless Chromium inside this container,
+// which fetches over loopback.
+function loopbackOnly(req: Request, res: Response, next: NextFunction): void {
+  const ip = req.socket.remoteAddress || "";
+  if (ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1") {
+    return next();
+  }
+  res.status(404).end();
+}
+
+app.use("/output", loopbackOnly, express.static(OUTPUT_DIR));
 
 // Health check
 app.get("/health", (_req, res) => {
@@ -98,7 +131,7 @@ app.get("/health", (_req, res) => {
 });
 
 // Submit a render job
-app.post("/render", (req, res) => {
+app.post("/render", requireToken, (req, res) => {
   const parsed = renderRequestSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -110,6 +143,17 @@ app.post("/render", (req, res) => {
   }
 
   const { jobId, clipIndex, props } = parsed.data;
+
+  // Refused up front, with a reason: the old code let a non-matching URL
+  // through and the caller only found out via a generic render failure later.
+  const resolvedVideoUrl = resolveOutputUrl(props.videoUrl, OUTPUT_DIR, PORT);
+  if (!resolvedVideoUrl) {
+    res.status(400).json({
+      error: "videoUrl must reference a clip on the output volume",
+    });
+    return;
+  }
+
   const renderId = uuidv4();
 
   const job: RenderJob = {
@@ -125,15 +169,6 @@ app.post("/render", (req, res) => {
   console.log(
     `[render] Queued render ${renderId} for job=${jobId} clip=${clipIndex}`
   );
-
-  // Resolve video URL: convert frontend/backend URLs to renderer's own static server
-  // The renderer serves /output/* from the shared Docker volume
-  let resolvedVideoUrl = props.videoUrl;
-  const videoPathMatch = props.videoUrl.match(/\/videos\/([^/]+)\/(.+)$/);
-  if (videoPathMatch) {
-    resolvedVideoUrl = `http://localhost:${PORT}/output/${videoPathMatch[1]}/${videoPathMatch[2]}`;
-    console.log(`[render] Resolved video URL: ${props.videoUrl} -> ${resolvedVideoUrl}`);
-  }
 
   // Runs in the background, but only once a render slot frees up
   runWhenSlotFree(() =>
@@ -171,8 +206,8 @@ app.post("/render", (req, res) => {
 });
 
 // Get render status
-app.get("/render/:renderId", (req, res) => {
-  const { renderId } = req.params;
+app.get("/render/:renderId", requireToken, (req, res) => {
+  const renderId = String(req.params.renderId);
   const job = renderJobs.get(renderId);
 
   if (!job) {
@@ -204,6 +239,12 @@ async function main() {
   console.log("[render-service] Initializing Remotion bundle...");
   await initBundle();
   console.log("[render-service] Bundle ready.");
+
+  if (!AUTH_TOKEN) {
+    console.warn(
+      "[render-service] RENDER_AUTH_TOKEN is unset: anyone who can reach " +
+      `port ${PORT} can queue renders. Set it here and on the API.`);
+  }
 
   app.listen(PORT, () => {
     console.log(`[render-service] Listening on port ${PORT}`);

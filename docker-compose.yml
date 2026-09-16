@@ -8,6 +8,10 @@ services:
       - .:/app
       - /app/__pycache__
       - ./output:/app/output
+    environment:
+      # Must match the renderer's, or the API cannot queue renders once the
+      # renderer is enforcing it.
+      - RENDER_AUTH_TOKEN=${RENDER_AUTH_TOKEN:-}
     restart: unless-stopped
 
   frontend:
@@ -29,14 +33,18 @@ services:
       context: .
       dockerfile: render-service/Dockerfile
     container_name: openshorts-renderer
-    ports:
-      - "3100:3100"
+    # Deliberately NOT published to the host: only `backend` calls this, over
+    # the compose network, and anyone who reaches it can queue renders. It was
+    # on 3100:3100, which put an unauthenticated render queue on the host.
+    expose:
+      - "3100"
     volumes:
       - ./output:/output
     environment:
       - REMOTION_BUNDLE_PATH=/app/remotion
       - OUTPUT_DIR=/output
       - PORT=3100
+      - RENDER_AUTH_TOKEN=${RENDER_AUTH_TOKEN:-}
     restart: unless-stopped
     depends_on:
       - backend

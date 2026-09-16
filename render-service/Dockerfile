@@ -37,5 +37,12 @@ RUN cd /app/remotion && npm ci
 # Build TypeScript
 RUN npm run build
 
+# Drop privileges, as the main API image already does. This container runs a
+# headless Chromium over user-supplied video, which is the least trustworthy
+# code in the stack to be running as root. node:*-slim ships an unused `node`
+# user; /output is a mounted volume, so its ownership is set by the host.
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3100
 CMD ["node", "dist/server.js"]

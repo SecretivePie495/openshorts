@@ -4053,6 +4053,14 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
 
 # --- Remotion Render Proxy ---
 RENDER_SERVICE_URL = os.getenv("RENDER_SERVICE_URL", "http://renderer:3100")
+# Shared secret with the render service. It renders whatever it is told to, so
+# reaching it is the whole exploit; unset means it accepts anyone who can open
+# a socket to it (it warns about that on boot).
+RENDER_AUTH_TOKEN = os.getenv("RENDER_AUTH_TOKEN", "")
+
+
+def _render_headers() -> dict:
+    return {"Authorization": f"Bearer {RENDER_AUTH_TOKEN}"} if RENDER_AUTH_TOKEN else {}
 
 @app.post("/api/render")
 async def proxy_render(request: Request):
@@ -4065,7 +4073,8 @@ async def proxy_render(request: Request):
         request, render_minutes, str(uuid.uuid4()), "render")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(f"{RENDER_SERVICE_URL}/render", json=body)
+            resp = await client.post(f"{RENDER_SERVICE_URL}/render", json=body,
+                                     headers=_render_headers())
         result = resp.json()
         if reservation_id:
             await _metering.commit_reservation(reservation_id)
@@ -4081,7 +4090,8 @@ async def proxy_render_status(render_id: str):
     import httpx
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_id}")
+            resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_id}",
+                                    headers=_render_headers())
             return resp.json()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Render service unavailable: {e}")
