@@ -48,3 +48,83 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+
+  # The render service is the one place nothing ran: its SSRF guard and its
+  # composition metadata are covered by node:test, and neither was executed
+  # anywhere before this job existed.
+  render-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: render-service/package-lock.json
+      - name: Install render-service dependencies
+        run: npm ci
+        working-directory: render-service
+      # The bundle test bundles remotion/src, which resolves Remotion from the
+      # remotion/ tree — the two must stay on one version (see 44531f8).
+      - name: Install remotion dependencies
+        run: npm ci
+        working-directory: remotion
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: render-service
+      - name: Test
+        run: npm test
+        working-directory: render-service
+
+  # Neither image was ever built here, so a broken apt/npm step in one only
+  # showed up at deploy. These two are cheap; the backend image is not, so it
+  # builds on main rather than on every pull request.
+  docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: render-service
+            dockerfile: render-service/Dockerfile
+            context: .
+          - name: dashboard
+            dockerfile: dashboard/Dockerfile
+            context: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.name }} image
+        run: docker build -f ${{ matrix.dockerfile }} ${{ matrix.context }}
+
+  backend-image:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build .
+
+  # Informational on purpose: an advisory in a transitive dependency is not a
+  # reason to block a pull request that has nothing to do with it, but nobody
+  # was looking at all before this.
+  dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: npm audit (dashboard)
+        run: npm audit --audit-level=high
+        working-directory: dashboard
+      - name: npm audit (render-service)
+        run: npm audit --audit-level=high
+        working-directory: render-service
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt -r requirements-billing.txt
