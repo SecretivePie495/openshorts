@@ -344,3 +344,65 @@ class TestMcpTool:
         names = [t["name"] for t in mcp_server.TOOLS]
         assert "recut_clip" in names
         assert "recut_clip" in mcp_server._TOOL_IMPLS
+
+
+class TestQueuedRender:
+    """sync=false: the POST answers once validation+quota are through, the
+    render runs as a background task, and the card polls render-status.
+    Both requests must share one event loop — a background task does not
+    survive the loop of a per-request asyncio.run."""
+
+    def _roundtrip(self, post_body):
+        async def _do():
+            transport = httpx.ASGITransport(app=app_module.app)
+            async with httpx.AsyncClient(transport=transport,
+                                         base_url="http://testserver") as client:
+                r1 = await client.post("/api/clip/rerender", json=post_body)
+                for _ in range(50):
+                    await asyncio.sleep(0.02)
+                    r2 = await client.get(f"/api/clip/{JOB_ID}/0/render-status")
+                    if r2.json()["state"] in ("done", "failed"):
+                        break
+                return r1, r2
+        try:
+            return asyncio.run(_do())
+        finally:
+            app_module._clip_renders.clear()
+
+    def test_queued_rerender_completes_and_persists(self, job, fake_recut):
+        r1, r2 = self._roundtrip({
+            "job_id": JOB_ID, "clip_index": 0, "sync": False,
+            "segments": [{"start": 12, "end": 22}]})
+        assert r1.status_code == 200
+        assert r1.json()["queued"] is True
+        body = r2.json()
+        assert body["state"] == "done", body
+        assert body["result"]["new_video_url"].endswith("recut_1_mytitle_clip_1.mp4")
+        meta = json.loads(job["meta_path"].read_text())
+        assert meta["shorts"][0]["video_url"] == body["result"]["new_video_url"]
+
+    def test_default_stays_synchronous_for_agents(self, job, fake_recut):
+        """MCP/curl callers must keep getting the finished render in the
+        POST response — the queue is a dashboard opt-in via sync=false."""
+        resp = _request("POST", "/api/clip/rerender", {
+            "job_id": JOB_ID, "clip_index": 0,
+            "segments": [{"start": 12, "end": 22}]})
+        assert resp.status_code == 200
+        assert resp.json()["new_video_url"]
+
+    def test_status_idle_when_nothing_queued(self, job):
+        resp = _request("GET", f"/api/clip/{JOB_ID}/0/render-status")
+        assert resp.status_code == 200
+        assert resp.json() == {"state": "idle"}
+
+    def test_failed_background_render_surfaces_in_poll(self, job, fake_recut, monkeypatch):
+        def boom(**kwargs):
+            raise RuntimeError("ffmpeg exploded")
+        monkeypatch.setattr(recut, "perform_recut", boom)
+        r1, r2 = self._roundtrip({
+            "job_id": JOB_ID, "clip_index": 0, "sync": False,
+            "segments": [{"start": 12, "end": 22}]})
+        assert r1.json()["queued"] is True
+        body = r2.json()
+        assert body["state"] == "failed"
+        assert "ffmpeg exploded" in body["error"]

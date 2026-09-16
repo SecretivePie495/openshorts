@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Share2, Instagram, Youtube, Video, AlertCircle, Loader2, Copy, Check, Wand2, Type, Calendar, Languages, FileText, Link2, Scissors, Crosshair, TrendingUp } from 'lucide-react';
+import { Download, Share2, Instagram, Youtube, Video, AlertCircle, Loader2, Copy, Check, Wand2, Type, Calendar, Languages, FileText, Link2, Scissors, Crosshair, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { getApiUrl } from '../config';
 import { apiFetch } from '../lib/api';
 import SubtitleModal from './SubtitleModal';
@@ -45,7 +45,7 @@ function formatDuration(clip) {
     return `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
 }
 
-export default function ResultCard({ clip, index, jobId, durable, uploadPostKey, uploadUserId, geminiApiKey, elevenLabsKey, isManaged, onPlay, onPause, onBulkSubtitle, clipCount = 1, bulkProgress, initialState = null, onStateChange, connectedPlatforms = null, onConnectSocials, onEditClip = null, onReframeClip = null }) {
+export default function ResultCard({ clip, index, jobId, durable, uploadPostKey, uploadUserId, geminiApiKey, elevenLabsKey, isManaged, onPlay, onPause, onBulkSubtitle, clipCount = 1, bulkProgress, initialState = null, onStateChange, connectedPlatforms = null, onConnectSocials, onEditClip = null, onReframeClip = null, renderState = null }) {
     const [showModal, setShowModal] = useState(false);
     const [showDescModal, setShowDescModal] = useState(false);
     const [showSubtitleModal, setShowSubtitleModal] = useState(false);
@@ -827,6 +827,28 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             {/* Right: Content & Details */}
             <div className="flex-1 p-4 md:p-5 flex flex-col overflow-hidden min-w-0">
                 <div className="mb-4">
+                    {renderState && (
+                        <div className="mb-2">
+                            {(renderState.state === 'queued' || renderState.state === 'running') && (
+                                <span className="inline-flex items-center gap-1.5 text-xs text-brass lowercase">
+                                    <Loader2 size={12} className="animate-spin" /> re-rendering — you can edit the others
+                                </span>
+                            )}
+                            {renderState.state === 'flashed' && (
+                                <span className="inline-flex items-center gap-1 text-xs text-ok lowercase">
+                                    <CheckCircle2 size={13} /> rendered
+                                </span>
+                            )}
+                            {renderState.state === 'failed' && (
+                                <button
+                                    className="inline-flex items-center gap-1 text-xs text-danger lowercase text-left"
+                                    title={renderState.error || ''}
+                                >
+                                    <AlertCircle size={13} /> render failed — {String(renderState.error || 'unknown error').slice(0, 120)}
+                                </button>
+                            )}
+                        </div>
+                    )}
                     <h3 className="text-base font-medium text-ink leading-tight line-clamp-2 mb-2 break-words" title={clip.video_title_for_youtube_short}>
                         {clip.video_title_for_youtube_short || "Viral Clip Generated"}
                     </h3>

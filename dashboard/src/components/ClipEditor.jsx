@@ -98,7 +98,7 @@ function editorReducer(state, action) {
     }
 }
 
-export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRerendered }) {
+export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRerendered, onRenderQueued }) {
     const { refreshMe } = useAuth();
     const [edl, setEdl] = useState(null);
     const [loadError, setLoadError] = useState(null);
@@ -922,6 +922,11 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     snap_to_words: false, // boundaries are already word-snapped client-side
                     reapply_captions: reapplyCaptions,
                     framing,
+                    // Fire, close, move on: the card polls render-status and
+                    // shows its own spinner/green tick. Saving five clips in
+                    // a row used to hold five minute-long POSTs open until
+                    // the proxy dropped them and lied about the result.
+                    sync: false,
                 }),
             });
             if (!res.ok) {
@@ -930,6 +935,12 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 throw new Error(detail);
             }
             const data = await res.json();
+            if (data.queued) {
+                // Validation and quota already answered; the render itself is
+                // the card's problem now. Hand off and get out of the way.
+                onRenderQueued?.(clipIndex);
+                return;
+            }
             setRenderedSegments(data.recipe.segments.map((s) => ({ ...s })));
             setRenderedFraming(data.framing || 'auto');
             setFraming(data.framing || 'auto');

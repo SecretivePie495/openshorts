@@ -3377,6 +3377,12 @@ class RerenderRequest(BaseModel):
     # would stamp a layer onto clips the user never captioned. The editor UI
     # sends its own choice explicitly.
     reapply_captions: bool = False
+    # sync=True (the default, and what MCP/curl callers get) answers with the
+    # finished render. The dashboard sends sync=false: validation and quota
+    # still answer now, the render runs in the background queue and the clip
+    # card shows its progress — five queued renders no longer hold five
+    # minute-long POSTs open until the edge proxy drops them.
+    sync: bool = True
     # None = inherit the recipe's framing (so plain trims keep the look);
     # 'auto' resets to the classifier; 'full'/'track' force a layout.
     framing: Optional[str] = None
@@ -3391,6 +3397,51 @@ _FRAMING_STRATEGIES = {"auto": None, "full": "WIDE", "track": "TRACK"}
 # One lock per job (same pattern as _restore_locks): rerenders on the same job
 # share metadata.json and the canonical files, so they must not interleave.
 _rerender_locks: Dict[str, asyncio.Lock] = {}
+
+# Background render queue (dashboard sync=false). One record per
+# (job, clip): a queued render replaces the previous one's record. Renders
+# of the SAME job are serialised by _rerender_locks (shared metadata.json
+# and canonical files); the global semaphore bounds how many ffmpeg trees
+# one container runs at once across DIFFERENT jobs.
+_clip_renders: Dict[Any, Dict[str, Any]] = {}
+_clip_render_seq = itertools.count(1)
+_render_sem: Optional[asyncio.Semaphore] = None
+
+
+def _get_render_sem() -> asyncio.Semaphore:
+    global _render_sem
+    if _render_sem is None:
+        _render_sem = asyncio.Semaphore(
+            max(1, int(os.environ.get("CLIP_RENDER_CONCURRENCY", "2"))))
+    return _render_sem
+
+
+def _render_record(job_id: str, clip_index: int) -> Dict[str, Any]:
+    rid = next(_clip_render_seq)
+    rec = {"id": rid, "state": "queued", "result": None, "error": None}
+    _clip_renders[(job_id, clip_index)] = rec
+    return rec
+
+
+async def _run_render_job(kind, job_id, clip_index, rec, prepare, execute):
+    """Shared body of the background rerender/reframe tasks: serialize per
+    job, bound globally, turn any failure into the record the UI polls."""
+    lock = _rerender_locks.setdefault(job_id, asyncio.Lock())
+    try:
+        async with lock:
+            async with _get_render_sem():
+                rec["state"] = "running"
+                ctx = await prepare()
+                payload = await execute(ctx)
+        rec["result"] = payload
+        rec["state"] = "done"
+    except HTTPException as e:
+        rec["error"] = str(e.detail)
+        rec["state"] = "failed"
+    except Exception as e:
+        rec["error"] = f"{type(e).__name__}: {e}"
+        rec["state"] = "failed"
+        print(f"❌ {kind} background render failed (job={job_id} clip={clip_index}): {e}")
 
 # Scene-listing builds write stable preview/thumbnail names per job; serialize
 # them so overlapping editor opens don't tear each other's files.
@@ -3420,12 +3471,31 @@ async def rerender_clip(req: RerenderRequest, request: Request):
     # produce) would otherwise race on the shared metadata.json
     # read-modify-write below, with the last writer silently reverting the
     # other clip's recipe/video_url.
-    lock = _rerender_locks.setdefault(req.job_id, asyncio.Lock())
-    async with lock:
-        return await _rerender_locked(req, request, job)
+    if req.sync:
+        lock = _rerender_locks.setdefault(req.job_id, asyncio.Lock())
+        async with lock:
+            return await _rerender_locked(req, request, job)
+    rec = _render_record(req.job_id, req.clip_index)
+    # Everything request-bound (auth, quota reservation) happens NOW, in the
+    # handler — the background task gets no Request object, only the prepared
+    # intent. Quota rejections still answer 402 to the click that caused them.
+    loop = asyncio.get_event_loop()
+    asyncio.create_task(_run_render_job(
+        "rerender", req.job_id, req.clip_index, rec,
+        prepare=lambda: _rerender_prepare(req, request, job),
+        execute=lambda ctx: _rerender_execute(ctx)))
+    return {"success": True, "queued": True, "render_id": rec["id"], "state": "queued"}
 
 
 async def _rerender_locked(req: RerenderRequest, request: Request, job):
+    ctx = await _rerender_prepare(req, request, job)
+    return await _rerender_execute(ctx)
+
+
+async def _rerender_prepare(req: RerenderRequest, request: Request, job):
+    """Validate the request, meter it, and freeze the plan. Fast and
+    request-bound; nothing here may touch ffmpeg. Returns the ctx consumed
+    by _rerender_execute (sync) or the background queue (sync=false)."""
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
     if not json_files:
@@ -3499,21 +3569,52 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
     v_transcript = (recut.virtual_transcript(transcript, segments)
                     if req.reapply_captions else None)
 
+    return {"req": req, "request": request, "job": job,
+            "output_dir": output_dir, "json_path": json_files[0],
+            "clean_name": clean_name, "canonical_range": canonical_range,
+            "segments": segments, "framing": framing,
+            "force_strategy": force_strategy, "fast": fast,
+            "canonical_path": canonical_path, "source_path": source_path,
+            "v_transcript": v_transcript, "reservation_id": reservation_id,
+            "total": total,
+            "output_format": data.get('output_format', 'auto'),
+            "watermark": bool(job.get('watermark'))}
+
+
+async def _rerender_execute(ctx):
+    """Do the render and the metadata write. Re-reads metadata.json here on
+    purpose: a queued render may sit behind another clip's write, and the
+    file — not the prepare-time snapshot — is the truth it must update."""
+    req = ctx["req"]
+    job = ctx["job"]
+    output_dir, clean_name = ctx["output_dir"], ctx["clean_name"]
+    segments, framing, fast = ctx["segments"], ctx["framing"], ctx["fast"]
+    canonical_range, reservation_id, total = (
+        ctx["canonical_range"], ctx["reservation_id"], ctx["total"])
+    with open(ctx["json_path"], 'r') as f:
+        data = json.load(f)
+    clips = data.get('shorts', [])
+    if req.clip_index >= len(clips):
+        if reservation_id:
+            await _metering.release_reservation(reservation_id)
+        raise HTTPException(status_code=404, detail="Clip not found")
+    clip = clips[req.clip_index]
+
     def run_recut():
         if fast:
             return recut.perform_recut(
-                input_path=canonical_path,
+                input_path=ctx["canonical_path"],
                 segments=recut.rebase_segments(
                     segments, canonical_range['start'], canonical_range['end']),
                 output_dir=output_dir, clean_name=clean_name,
-                reframe=False, captions_transcript=v_transcript)
+                reframe=False, captions_transcript=ctx["v_transcript"])
         return recut.perform_recut(
-            input_path=source_path, segments=segments,
+            input_path=ctx["source_path"], segments=segments,
             output_dir=output_dir, clean_name=clean_name,
-            reframe=True, output_format=data.get('output_format', 'auto'),
-            watermark=bool(job.get('watermark')),
-            force_strategy=force_strategy,
-            captions_transcript=v_transcript)
+            reframe=True, output_format=ctx["output_format"],
+            watermark=ctx["watermark"],
+            force_strategy=ctx["force_strategy"],
+            captions_transcript=ctx["v_transcript"])
 
     try:
         loop = asyncio.get_event_loop()
@@ -3544,7 +3645,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
             updates['crop_overrides'] = None
         clip.update(updates)
         data['shorts'] = clips
-        with open(json_files[0], 'w') as f:
+        with open(ctx["json_path"], 'w') as f:
             json.dump(data, f, indent=2)
         mem_clips = (job.get('result') or {}).get('clips') or []
         if req.clip_index < len(mem_clips):
@@ -3593,6 +3694,7 @@ class ReframeRequest(BaseModel):
     # know the source dimensions.
     crop_overrides: Dict[str, Any]
     reapply_captions: bool = False
+    sync: bool = True
 
 
 def _clip_scene_workfile(source_path, segments, output_dir, token):
@@ -3807,12 +3909,26 @@ async def reframe_clip(req: ReframeRequest, request: Request):
     # Same lock as /rerender: both read-modify-write the job's metadata.json,
     # and the metadata must be read INSIDE the lock or a rerender committing
     # in between gets clobbered by a write of stale data.
-    lock = _rerender_locks.setdefault(req.job_id, asyncio.Lock())
-    async with lock:
-        return await _reframe_locked(req, request, job, overrides)
+    if req.sync:
+        lock = _rerender_locks.setdefault(req.job_id, asyncio.Lock())
+        async with lock:
+            ctx = await _reframe_prepare(req, request, job, overrides)
+            return await _reframe_execute(ctx)
+    rec = _render_record(req.job_id, req.clip_index)
+    asyncio.create_task(_run_render_job(
+        "reframe", req.job_id, req.clip_index, rec,
+        prepare=lambda: _reframe_prepare(req, request, job, overrides),
+        execute=_reframe_execute))
+    return {"success": True, "queued": True, "render_id": rec["id"], "state": "queued"}
 
 
 async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides):
+    ctx = await _reframe_prepare(req, request, job, overrides)
+    return await _reframe_execute(ctx)
+
+
+async def _reframe_prepare(req: ReframeRequest, request: Request, job, overrides):
+    """Validate + meter + freeze the plan (see _rerender_prepare)."""
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
     if not json_files:
@@ -3866,15 +3982,42 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
     # "Error opening output ...: File name too long".
     clean_name = f"{base_name}_clip_{req.clip_index + 1}.mp4"
 
+    return {"req": req, "job": job, "overrides": overrides,
+            "output_dir": output_dir, "json_path": json_files[0],
+            "clean_name": clean_name, "segments": segments,
+            "canonical_range": canonical_range, "source_path": source_path,
+            "framing": framing, "force_strategy": force_strategy,
+            "reservation_id": reservation_id, "v_transcript": v_transcript,
+            "output_format": data.get('output_format', 'auto'),
+            "watermark": bool(job.get('watermark'))}
+
+
+async def _reframe_execute(ctx):
+    """Do the re-render + metadata write (re-reads metadata: see
+    _rerender_execute's note on queued renders)."""
+    req, job = ctx["req"], ctx["job"]
+    overrides = ctx["overrides"]
+    output_dir, clean_name = ctx["output_dir"], ctx["clean_name"]
+    segments, canonical_range = ctx["segments"], ctx["canonical_range"]
+    framing, reservation_id = ctx["framing"], ctx["reservation_id"]
+    with open(ctx["json_path"], 'r') as f:
+        data = json.load(f)
+    clips = data.get('shorts', [])
+    if req.clip_index >= len(clips):
+        if reservation_id:
+            await _metering.release_reservation(reservation_id)
+        raise HTTPException(status_code=404, detail="Clip not found")
+    clip = clips[req.clip_index]
+
     def run():
         return recut.perform_recut(
-            input_path=source_path, segments=segments,
+            input_path=ctx["source_path"], segments=segments,
             output_dir=output_dir, clean_name=clean_name,
-            reframe=True, output_format=data.get('output_format', 'auto'),
-            watermark=bool(job.get('watermark')),
-            force_strategy=force_strategy,
+            reframe=True, output_format=ctx["output_format"],
+            watermark=ctx["watermark"],
+            force_strategy=ctx["force_strategy"],
             crop_overrides=overrides,
-            captions_transcript=v_transcript)
+            captions_transcript=ctx["v_transcript"])
 
     try:
         loop = asyncio.get_event_loop()
@@ -3893,7 +4036,7 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
         }
         clip.update(updates)
         data['shorts'] = clips
-        with open(json_files[0], 'w') as f:
+        with open(ctx["json_path"], 'w') as f:
             json.dump(data, f, indent=2)
         mem_clips = (job.get('result') or {}).get('clips') or []
         if req.clip_index < len(mem_clips):
@@ -3918,6 +4061,23 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
             await _metering.release_reservation(reservation_id)
         print(f"Reframe Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clip/{job_id}/{clip_index}/render-status")
+async def clip_render_status(job_id: str, clip_index: int, request: Request):
+    """Poll target for the queued (sync=false) rerender/reframe: queued →
+    running → done|failed, with the finished render payload on done."""
+    job = jobs.get(job_id)
+    if job is None:
+        job = _job_view_from_disk(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await _assert_job_owner(request, job)
+    rec = _clip_renders.get((job_id, clip_index))
+    if not rec:
+        return {"state": "idle"}
+    return {"state": rec["state"], "render_id": rec["id"],
+            "result": rec["result"], "error": rec["error"]}
 
 
 # --- Remotion Render Proxy ---

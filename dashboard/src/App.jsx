@@ -388,6 +388,51 @@ function App() {
     s.timer = setTimeout(flushClipState, 2000);
   };
 
+  // Queued renders (sync=false): the editor queues, this state drives the
+  // per-card polling UI, and the result lands through the SAME handler the
+  // synchronous save used — one apply path, one truth.
+  const [renderQueue, setRenderQueue] = useState({});
+  const handleRenderQueued = (index) => {
+    setRenderQueue((q) => ({ ...q, [index]: { state: 'queued' } }));
+  };
+
+  useEffect(() => {
+    if (!jobId) return undefined;
+    const active = Object.entries(renderQueue)
+      .filter(([, r]) => r.state === 'queued' || r.state === 'running');
+    if (!active.length) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      for (const [idx, rec] of active) {
+        try {
+          const st = await apiJson(`/api/clip/${jobId}/${idx}/render-status`);
+          if (cancelled) return;
+          if (st.state === 'done') {
+            handleClipRerendered(Number(idx), st.result);
+            setRenderQueue((q) => ({ ...q, [idx]: { state: 'flashed' } }));
+            setTimeout(() => setRenderQueue((q) => {
+              const n = { ...q }; delete n[idx]; return n;
+            }), 9000);
+          } else if (st.state === 'failed') {
+            setRenderQueue((q) => ({ ...q, [idx]: { state: 'failed', error: st.error } }));
+            setTimeout(() => setRenderQueue((q) => {
+              const n = { ...q }; delete n[idx]; return n;
+            }), 20000);
+          } else if (st.state !== 'idle') {
+            setRenderQueue((q) => ({ ...q, [idx]: { ...rec, state: st.state } }));
+          }
+        } catch { /* transient poll failure: next tick retries */ }
+      }
+    };
+    tick();
+    const t = setInterval(tick, 4000);
+    return () => { cancelled = true; clearInterval(t); };
+    // handleClipRerendered is a fresh closure every render (it writes to
+    // several states); adding it as a dep would re-create the interval on
+    // every parent render. The queue state is the only real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, renderQueue]);
+
   // A recut replaced the clip's server file with a fresh render (burned layers
   // reset), so update the results, the reopened-project state and the synced
   // per-clip edit state, and let the ResultCard remount from the new file.
@@ -1970,6 +2015,7 @@ function App() {
                           onConnectSocials={isManaged ? handleConnectSocials : null}
                           onPlay={(time) => handleClipPlay(time)}
                           onPause={handleClipPause}
+                          renderState={renderQueue[i] || null}
                           onBulkSubtitle={handleBulkSubtitles}
                           clipCount={results.clips.length}
                           bulkProgress={bulkSub}
@@ -2142,6 +2188,7 @@ function App() {
           clipTitle={results.clips[editingClip].video_title_for_youtube_short || ''}
           onClose={() => setEditingClip(null)}
           onRerendered={handleClipRerendered}
+          onRenderQueued={(index) => { handleRenderQueued(index); setEditingClip(null); }}
         />
       )}
       {reframingClip !== null && results?.clips?.[reframingClip] && (
@@ -2151,6 +2198,7 @@ function App() {
           clipTitle={results.clips[reframingClip].video_title_for_youtube_short || ''}
           onClose={() => setReframingClip(null)}
           onReframed={handleClipRerendered}
+          onReframeQueued={(index) => { handleRenderQueued(index); setReframingClip(null); }}
         />
       )}
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}

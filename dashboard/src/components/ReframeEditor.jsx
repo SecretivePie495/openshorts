@@ -23,7 +23,7 @@ const fmt = (s) => {
     return `${m}:${String(r).padStart(2, '0')}`;
 };
 
-export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, onReframed }) {
+export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, onReframed, onReframeQueued }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [data, setData] = useState(null);
@@ -143,8 +143,14 @@ export default function ReframeEditor({ jobId, clipIndex, clipTitle, onClose, on
             const res = await apiJson('/api/clip/reframe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_id: jobId, clip_index: clipIndex, crop_overrides: payload }),
+                body: JSON.stringify({ job_id: jobId, clip_index: clipIndex, crop_overrides: payload, sync: false }),
             });
+            if (res.queued) {
+                // Same handoff as the clip editor: the card owns the spinner
+                // and the green tick now.
+                onReframeQueued?.(clipIndex);
+                return;
+            }
             if (onReframed) onReframed(clipIndex, res);
             // Stay open with a visible verdict: closing to the card the
             // moment the render finished made "did it take?" a guess.
