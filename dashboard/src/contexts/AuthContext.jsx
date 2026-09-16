@@ -5,7 +5,7 @@
 // When billingEnabled is false the provider is inert and the app behaves as the
 // classic BYOK dashboard.
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getApiUrl } from '../config';
+import { getApiUrl, setMediaToken } from '../config';
 import { apiFetch, apiJson, getToken, setToken, clearToken } from '../lib/api';
 import { track, identify, reset as resetAnalytics } from '../lib/analytics';
 import { report as reportAttribution } from '../lib/attribution';
@@ -19,6 +19,7 @@ export function AuthProvider({ children }) {
   const [me, setMe] = useState(null);           // /api/me payload, or null when signed out
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
+  const [mediaTtl, setMediaTtl] = useState(0);
 
   const refreshMe = useCallback(async () => {
     if (!getToken()) { setMe(null); return null; }
@@ -33,6 +34,21 @@ export function AuthProvider({ children }) {
       clearToken();
       setMe(null);
       return null;
+    }
+  }, []);
+
+  // The bearer that travels in media URLs. Short-lived by design, so it is
+  // re-minted well before it lapses; a failure here only costs media access,
+  // never the session.
+  const refreshMediaToken = useCallback(async () => {
+    if (!getToken()) { setMediaToken(''); return 0; }
+    try {
+      const data = await apiJson('/api/media-token');
+      setMediaToken(data.token);
+      return Number(data.expiresIn) || 0;
+    } catch (_) {
+      setMediaToken('');
+      return 0;
     }
   }, []);
 
@@ -109,11 +125,26 @@ export function AuthProvider({ children }) {
         if (cfg.billingEnabled) {
           const handled = await handleAuthHash();
           if (!handled) await refreshMe();
+          // Before loading clears, so nothing renders a media URL that would
+          // be missing the token the server is about to start requiring.
+          if (cfg.mediaAuthEnabled) setMediaTtl(await refreshMediaToken());
         }
       } catch (_) { /* config fetch failed — stay in BYOK */ }
       setLoading(false);
     })();
-  }, [handleAuthHash, refreshMe]);
+  }, [handleAuthHash, refreshMe, refreshMediaToken]);
+
+  // Re-mint at half-life so a tab left open overnight keeps working. A failed
+  // mint reports 0, which retries soon instead of silently leaving the tab
+  // without media until someone reloads.
+  useEffect(() => {
+    if (!config.mediaAuthEnabled || !me?.user) return undefined;
+    const timer = setTimeout(
+      async () => { setMediaTtl(await refreshMediaToken()); },
+      mediaTtl ? (mediaTtl / 2) * 1000 : 60000,
+    );
+    return () => clearTimeout(timer);
+  }, [config.mediaAuthEnabled, me?.user, mediaTtl, refreshMediaToken]);
 
   const requestMagicLink = useCallback(async (email) => {
     const res = await apiFetch('/api/auth/magic-link', {
@@ -133,6 +164,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     clearToken();
     setMe(null);
+    setMediaToken('');
+    setMediaTtl(0);
     resetAnalytics();
   }, []);
 

@@ -24,7 +24,6 @@ from typing import Any, Dict, Optional, List
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
@@ -92,6 +91,12 @@ for _stream in (sys.stdout, sys.stderr):
 # when BILLING_ENABLED is set. With the flag off, the app behaves exactly as the
 # self-hosted BYOK app does today (no extra dependencies required).
 BILLING_ENABLED = os.environ.get("BILLING_ENABLED", "").lower() in ("1", "true", "yes")
+
+# Ownership checks on the /videos and /thumbnails bytes (media_auth). Off by
+# default because it only works once the dashboard appends ?mt= to media URLs:
+# turning it on against an older frontend makes every player 404. Self-host is
+# unaffected either way — with BILLING off there are no tenants to separate.
+MEDIA_AUTH_ENABLED = os.environ.get("MEDIA_AUTH_ENABLED", "").lower() in ("1", "true", "yes")
 
 # Job/file retention (issue #46). Self-host defaults to 24h: the 1h sweep kept
 # deleting finished projects under users who never touched their env, and the
@@ -1740,15 +1745,89 @@ app.add_middleware(
 # restoring it. Late-bound lambda: the restorer is defined further down.
 from restoring_static import RestoringStaticFiles
 import media_auth
+
+
+def _media_secret() -> str:
+    """The key both media token shapes are signed with, or "" when there is
+    nothing to protect (self-host has no tenants)."""
+    return cloud.settings.jwt_secret if (BILLING_ENABLED and cloud) else ""
+
+
+def _media_owner(kind: str, rel_path: str) -> Optional[str]:
+    """The uid owning this media path, or None when nobody has claimed it.
+
+    None means public, exactly as in ``_assert_job_owner``: BYOK, anonymous and
+    self-host jobs never stamp an owner, and refusing those would break the
+    self-host app that has no user to compare against.
+    """
+    first = rel_path.split("/", 1)[0]
+    if not first:
+        return None
+    if kind == "thumbnails":
+        record = thumbnail_sessions.get(first)
+        owner = record.get("user_id") if isinstance(record, dict) else None
+        return str(owner) if owner else None
+    record = jobs.get(first)
+    owner = record.get("user_id") if isinstance(record, dict) else None
+    if owner:
+        return str(owner)
+    # Restarts drop the in-memory record but leave the sidecar, and a job that
+    # survives a redeploy must not become public by surviving it.
+    try:
+        with open(os.path.join(OUTPUT_DIR, first, ".owner")) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+async def _media_authorized(kind: str, rel_path: str, scope) -> bool:
+    """Whether this request may have these bytes.
+
+    Three ways to prove it, because a ``<video src>`` cannot send a header:
+    the signed path capability handed to webhooks and MCP tools, the
+    dashboard's short-lived per-user token, and an ordinary Authorization /
+    X-API-Key header from an agent or curl.
+    """
+    if not (MEDIA_AUTH_ENABLED and BILLING_ENABLED):
+        return True
+    owner = _media_owner(kind, rel_path)
+    if owner is None:
+        return True
+    secret = _media_secret()
+    if not secret:
+        return True
+    request = Request(scope)
+    params = request.query_params
+
+    signed_path = media_auth.strip_media_prefix(f"/{kind}/{rel_path}")
+    if signed_path and params.get("sig") and media_auth.verify_path_signature(
+            signed_path, params.get("exp"), params.get("sig"), secret):
+        return True
+
+    token = params.get("mt")
+    if token and media_auth.verify_user_token(token, secret) == owner:
+        return True
+
+    user = await _user_from_request(request)
+    return user is not None and str(user.id) == owner
+
+
 app.mount("/videos", RestoringStaticFiles(
     directory=OUTPUT_DIR,
     guard=media_auth.is_servable,
+    authorizer=lambda rel, scope: _media_authorized("videos", rel, scope),
     restorer=lambda job_id: _restore_for_public_path(job_id)), name="videos")
 
-# Mount static files for serving thumbnails
+# Mount static files for serving thumbnails. Same two guards as /videos: this
+# mount served every file under its directory to anyone, and the face crops
+# under it are as much the user's as the clips are.
 THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
-app.mount("/thumbnails", StaticFiles(directory=THUMBNAILS_DIR), name="thumbnails")
+app.mount("/thumbnails", RestoringStaticFiles(
+    directory=THUMBNAILS_DIR,
+    guard=media_auth.is_servable,
+    authorizer=lambda rel, scope: _media_authorized("thumbnails", rel, scope),
+), name="thumbnails")
 
 
 def _safe_under(base_dir: str, user_rel_path: str) -> Optional[str]:
@@ -2034,9 +2113,31 @@ async def get_config():
         "billingEnabled": BILLING_ENABLED,
         "googleAuthEnabled": bool(BILLING_ENABLED and cloud.settings.google_auth_enabled),
         "jobRetentionSeconds": JOB_RETENTION_SECONDS,
+        # Tells the dashboard whether media URLs need a ?mt= token appended.
+        "mediaAuthEnabled": bool(MEDIA_AUTH_ENABLED and BILLING_ENABLED),
         # Self-host only: tells the dashboard the Gemini key is optional
         # because the moment picker runs on an OpenAI-compatible server.
         "localLlm": None if BILLING_ENABLED else llm_backend.describe(),
+    }
+
+
+@app.get("/api/media-token")
+async def get_media_token(request: Request):
+    """Mint the short-lived bearer the dashboard puts in media URLs.
+
+    A ``<video src>`` cannot carry a header, so something has to travel in the
+    query string; this dies in hours rather than the session JWT's 30 days,
+    which is the whole point of not reusing that one.
+    """
+    user = await _user_from_request(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    secret = _media_secret()
+    if not secret:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {
+        "token": media_auth.mint_user_token(user.id, secret),
+        "expiresIn": media_auth.MEDIA_TOKEN_TTL_SECONDS,
     }
 
 async def _probe_youtube_quality(url: str) -> dict:

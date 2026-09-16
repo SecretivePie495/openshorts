@@ -16,13 +16,14 @@ more. The restorer is awaited on the request, so a player that arrives while
 a restore is in flight simply waits for it (the per-job lock lives in the
 restorer) instead of failing.
 """
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from starlette.exceptions import HTTPException
 from starlette.staticfiles import StaticFiles
 
 Restorer = Callable[[str], Awaitable[bool]]
 Guard = Callable[[str], bool]
+Authorizer = Callable[[str, Any], Awaitable[bool]]
 
 
 class RestoringStaticFiles(StaticFiles):
@@ -35,24 +36,28 @@ class RestoringStaticFiles(StaticFiles):
     ``*_metadata.json`` carrying the full transcript of the user's video.
     Verified served, unauthenticated, on 7-sep-2026.
 
-    This is only the path half of media_auth: the clips themselves, and the
-    untouched source video sitting in the same directory, are still public to
-    anyone who has the job id. Closing that needs the capability tokens the
-    module was written for, which is a bigger change (request handlers, an
-    /api/media-token endpoint, and the dashboard appending the token to every
-    media URL) and must ship with its frontend half.
+    ``authorizer`` is the other half: the allowlist decides what KIND of file
+    may be served, this decides WHO may have it. Without it the clips and the
+    untouched source video are public to anyone holding the job id. It is
+    awaited per request and receives the raw ASGI scope, because the caller can
+    prove itself three ways (a per-user ``?mt=`` token, a signed ``?exp=&sig=``
+    path capability, or an ordinary auth header) and only the app knows how.
     """
 
     def __init__(self, *args, restorer: Optional[Restorer] = None,
-                 guard: Optional[Guard] = None, **kwargs):
+                 guard: Optional[Guard] = None,
+                 authorizer: Optional[Authorizer] = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.restorer = restorer
         self.guard = guard
+        self.authorizer = authorizer
 
     async def get_response(self, path: str, scope):
         # Before the filesystem: a refused path must look exactly like a
         # missing one, or the 404-vs-403 difference confirms the file is there.
         if self.guard is not None and not self.guard(path):
+            raise HTTPException(status_code=404)
+        if self.authorizer is not None and not await self.authorizer(path, scope):
             raise HTTPException(status_code=404)
         try:
             return await super().get_response(path, scope)
