@@ -21,6 +21,9 @@ export interface SubtitleStyle {
   bgColor: string;
   bgOpacity: number;
   animation: SubtitleAnimation;
+  // Karaoke look: dim inactive words (0-1) and force uppercase.
+  baseOpacity?: number;
+  uppercase?: boolean;
 }
 
 export interface SubtitleConfig {
@@ -33,7 +36,6 @@ export interface SubtitleConfig {
 export type HookPosition = "top" | "center" | "bottom";
 export type HookSize = "S" | "M" | "L";
 export type HookEntrance = "spring" | "fade" | "slide-up" | "none";
-
 export type HookStyle =
   | "classic"
   | "dark"
@@ -46,9 +48,9 @@ export interface HookConfig {
   text: string;
   position: HookPosition;
   size: HookSize;
+  style?: HookStyle;
   entranceAnimation: HookEntrance;
   displayDurationSec: number;
-  style?: HookStyle;
   // Free-drag center point (0-1 of frame width/height). Overrides `position` when set.
   xPct?: number;
   yPct?: number;
@@ -111,6 +113,9 @@ export const hookConfigSchema = z.object({
   text: z.string(),
   position: z.enum(["top", "center", "bottom"]),
   size: z.enum(["S", "M", "L"]),
+  style: z
+    .enum(["classic", "dark", "yellow", "red", "outline", "outline_yellow"])
+    .default("classic"),
   entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
   displayDurationSec: z.number().positive(),
   xPct: z.number().min(0).max(1).optional(),

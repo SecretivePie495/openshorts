@@ -158,6 +158,19 @@ const WordSpan: React.FC<WordSpanProps> = ({
   let color = style.fontColor;
   let extraStyle: React.CSSProperties = {};
 
+  // Dim inactive words toward the backend's opaque scaled color (matches the
+  // burned ASS look; not CSS opacity).
+  if (!isActive && style.baseOpacity != null && style.baseOpacity < 1) {
+    const m = /^#?([0-9a-fA-F]{6})$/.exec(style.fontColor || "#FFFFFF");
+    if (m) {
+      const scale = 0.35 + 0.65 * style.baseOpacity;
+      const [r, g, b] = [0, 2, 4].map((i) =>
+        Math.round(parseInt(m[1].slice(i, i + 2), 16) * scale)
+      );
+      color = `rgb(${r}, ${g}, ${b})`;
+    }
+  }
+
   if (isActive) {
     color = style.highlightColor;
 
@@ -218,6 +231,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
         transform,
         display: "inline-block",
         transition: "none",
+        textTransform: style.uppercase ? "uppercase" : "none",
         ...extraStyle,
       }}
     >
