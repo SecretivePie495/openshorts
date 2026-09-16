@@ -326,7 +326,8 @@ def cut_clip(input_video, clip_temp_path, start, end, clip_number):
 
     def _run():
         result = subprocess.run(command, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE, text=True, errors="replace")
+                                stderr=subprocess.PIPE, text=True,
+                                errors="replace", timeout=1800)
         # ffmpeg has been seen exiting 0 having written nothing, so the file
         # itself is the verdict, not just the return code.
         size = os.path.getsize(clip_temp_path) if os.path.exists(clip_temp_path) else 0

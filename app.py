@@ -689,6 +689,11 @@ HEARTBEAT_STALE_AFTER = 60           # no heartbeat for this long = nobody has i
 RESUME_SCAN_INTERVAL = 30            # seconds between looks for stale manifests
 HANDOVER_CHECK_INTERVAL = 5          # seconds between looks at the marker
 DRAIN_TIMEOUT_SECONDS = int(os.environ.get("DRAIN_TIMEOUT_SECONDS", "840"))
+# Wall-clock ceiling for one job's subprocess. The per-step ffmpeg timeouts
+# cap each encode, but a job that wedges between them would otherwise hold
+# one of MAX_CONCURRENT_JOBS slots forever — a handful of those and the queue
+# stops moving for everyone. 0 disables the watchdog.
+JOB_TIMEOUT_SECONDS = int(os.environ.get("JOB_TIMEOUT_SECONDS", "14400"))
 # After the jobs are drained, keep SERVING this long with /health/ready at 503
 # before closing the socket: the proxy only drops a container once its Docker
 # healthcheck has failed interval*retries times (15 s with the Coolify
@@ -1849,6 +1854,24 @@ def enqueue_output(out, job_id):
     finally:
         out.close()
 
+async def _kill_job_process(process):
+    """SIGTERM the job's whole process group, then SIGKILL what survives.
+
+    main.py spawns ffmpeg children, so signalling just the direct child would
+    leave the encode running — still burning CPU and disk on a job nobody is
+    waiting for any more.
+    """
+    for sig, grace in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(os.getpgid(process.pid), sig)
+        except OSError:
+            return
+        for _ in range(grace):
+            await asyncio.sleep(1)
+            if process.poll() is not None:
+                return
+
+
 async def run_job(job_id, job_data):
     """Executes the subprocess for a specific job."""
     
@@ -1866,7 +1889,10 @@ async def run_job(job_id, job_data):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, # Merge stderr to stdout
             env=env,
-            cwd=os.getcwd()
+            cwd=os.getcwd(),
+            # Own process group so the watchdog below can stop the ffmpeg
+            # children too, not just main.py.
+            start_new_session=True,
         )
         
         # We need to capture logs in a thread because Popen isn't async
@@ -1879,6 +1905,10 @@ async def run_job(job_id, job_data):
         last_heartbeat = time.time()
         while process.poll() is None:
             await asyncio.sleep(2)
+            if JOB_TIMEOUT_SECONDS and time.time() - start_wait > JOB_TIMEOUT_SECONDS:
+                await _kill_job_process(process)
+                raise TimeoutError(
+                    f"Job exceeded the {JOB_TIMEOUT_SECONDS}s limit and was stopped.")
             if time.time() - last_heartbeat >= HEARTBEAT_EVERY:
                 _touch_manifest(job_id)
                 last_heartbeat = time.time()

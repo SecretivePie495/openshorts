@@ -16,10 +16,53 @@ export interface RenderJob {
   progress: number;
   outputUrl?: string;
   error?: string;
+  finishedAt?: number;
 }
 
 // In-memory render job map
 export const renderJobs = new Map<string, RenderJob>();
+
+// Each render drives a headless Chromium; accepting them all at once is how
+// the container OOMs and takes every in-flight render down with it. Extra
+// requests queue instead of starting a process.
+const MAX_CONCURRENT_RENDERS = parseInt(
+  process.env.MAX_CONCURRENT_RENDERS || "2",
+  10
+);
+// Finished renders stay queryable this long so clients can still poll for the
+// result, then get swept — the map is otherwise append-only for the life of
+// the process.
+const FINISHED_JOB_TTL_MS = parseInt(
+  process.env.FINISHED_JOB_TTL_MS || "3600000",
+  10
+);
+
+let activeRenders = 0;
+const waiting: Array<() => void> = [];
+
+function runWhenSlotFree(task: () => Promise<void>): void {
+  const start = () => {
+    activeRenders++;
+    void task().finally(() => {
+      activeRenders--;
+      waiting.shift()?.();
+    });
+  };
+  if (activeRenders < MAX_CONCURRENT_RENDERS) {
+    start();
+  } else {
+    waiting.push(start);
+  }
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - FINISHED_JOB_TTL_MS;
+  for (const [id, job] of renderJobs) {
+    if (job.finishedAt !== undefined && job.finishedAt < cutoff) {
+      renderJobs.delete(id);
+    }
+  }
+}, 60_000).unref();
 
 // --- Request validation schema ---
 
@@ -92,30 +135,37 @@ app.post("/render", (req, res) => {
     console.log(`[render] Resolved video URL: ${props.videoUrl} -> ${resolvedVideoUrl}`);
   }
 
-  // Fire and forget - render runs in background
-  executeRender({
-    renderId,
-    jobId,
-    clipIndex,
-    props: {
-      videoUrl: resolvedVideoUrl,
-      durationInFrames: props.durationInFrames,
-      fps: props.fps,
-      width: props.width,
-      height: props.height,
-      subtitles: props.subtitles ?? null,
-      hook: props.hook ?? null,
-      effects: props.effects ?? null,
-    },
-  }).catch((err) => {
-    console.error(`[render] Unhandled error for ${renderId}:`, err);
-    const existingJob = renderJobs.get(renderId);
-    if (existingJob) {
-      existingJob.status = "error";
-      existingJob.error =
-        err instanceof Error ? err.message : "Unknown error";
-    }
-  });
+  // Runs in the background, but only once a render slot frees up
+  runWhenSlotFree(() =>
+    executeRender({
+      renderId,
+      jobId,
+      clipIndex,
+      props: {
+        videoUrl: resolvedVideoUrl,
+        durationInFrames: props.durationInFrames,
+        fps: props.fps,
+        width: props.width,
+        height: props.height,
+        subtitles: props.subtitles ?? null,
+        hook: props.hook ?? null,
+        effects: props.effects ?? null,
+      },
+    })
+      .catch((err) => {
+        console.error(`[render] Unhandled error for ${renderId}:`, err);
+        const existingJob = renderJobs.get(renderId);
+        if (existingJob) {
+          existingJob.status = "error";
+          existingJob.error =
+            err instanceof Error ? err.message : "Unknown error";
+        }
+      })
+      .finally(() => {
+        const existingJob = renderJobs.get(renderId);
+        if (existingJob) existingJob.finishedAt = Date.now();
+      })
+  );
 
   res.status(202).json({ renderId, status: "queued" });
 });

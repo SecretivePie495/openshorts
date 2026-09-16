@@ -1027,7 +1027,7 @@ def generate_broll(
         output_path,
     ]
 
-    subprocess.run(cmd, check=True, capture_output=True)
+    subprocess.run(cmd, check=True, capture_output=True, timeout=1800)
 
     # Cleanup temp image
     if os.path.exists(img_path):
@@ -1050,7 +1050,7 @@ def _get_media_duration(path: str) -> float:
         path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         output = result.stdout.strip()
         if output:
             return float(output)
@@ -1204,7 +1204,7 @@ def composite_video(
             "-c:a", "aac", "-b:a", "128k",
             output_path,
         ]
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, timeout=1800)
         print(f"[SaaSShorts] ✅ Final video (simple): {output_path}")
         return output_path
 
@@ -1295,7 +1295,7 @@ def composite_video(
         output_path,
     ]
 
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=1800)
     print(f"[SaaSShorts] ✅ Final video (composite): {output_path}")
     return output_path
 

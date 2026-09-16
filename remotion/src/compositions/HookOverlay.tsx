@@ -43,15 +43,6 @@ const HOOK_LOOKS: Record<string, HookLook> = {
   outline_yellow: { box: null, text: "#FFD600", outlinePx: 8, outlineColor: "#000000", shadow: false },
 };
 
-const textStroke = (px: number, color: string): string => {
-  if (!px) return "none";
-  const o: string[] = [];
-  for (let dx = -px; dx <= px; dx++)
-    for (let dy = -px; dy <= px; dy++)
-      if (dx || dy) o.push(`${dx}px ${dy}px 0 ${color}`);
-  return o.join(", ");
-};
-
 export const HookOverlay: React.FC<HookOverlayProps> = ({ config }) => {
   const { fps } = useVideoConfig();
   const displayFrames = Math.round(config.displayDurationSec * fps);
@@ -170,7 +161,13 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
             color: look.text,
             lineHeight: 1.4,
             wordBreak: "break-word",
-            textShadow: textStroke(look.outlinePx, look.outlineColor),
+            // Same stroke the dashboard preview draws, so the burned-in clip
+            // matches what the editor showed. The old text-shadow spread cost
+            // (2*px+1)^2 layers — 289 at 8px — recomputed on every frame.
+            WebkitTextStroke: look.outlinePx
+              ? `${look.outlinePx}px ${look.outlineColor}`
+              : undefined,
+            paintOrder: "stroke fill",
           }}
         >
           {config.text}

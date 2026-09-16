@@ -20,7 +20,6 @@ hook stands. Never raises: a hook problem must never cost the clip.
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Optional
 
@@ -132,15 +131,15 @@ def _ask_gemini(frames, prompt, api_key):
     parts = [genai_types.Part.from_bytes(data=b, mime_type="image/jpeg") for b in frames]
     # Capacity chain: a jammed flash-lite should not cost the clip its
     # grounded hook when a sibling would answer in seconds.
-    response = gemini_worker.generate_with_capacity_chain(
+    answer, _model = gemini_worker.generate_with_capacity_chain(
         client, model_name,
         contents=parts + [prompt],
         config=genai_types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=gemini_worker.GroundedHook,
-        ), where="hook-grounding")
-    gemini_worker.raise_if_blocked(response)
-    return json.loads(response.text) or {}
+        ), where="hook-grounding",
+        validate=gemini_worker.parse_json_response)
+    return answer or {}
 
 
 def reground(clip_path, clip, transcript, start, end) -> Optional[dict]:

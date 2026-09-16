@@ -207,8 +207,18 @@ def _extract_wav(media_path):
         "ffmpeg", "-y", "-loglevel", "error", "-i", media_path,
         "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav_path,
     ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.PIPE, timeout=1800)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, timeout=1800)
+    except BaseException:
+        # The caller's try/finally only arms once this returns, so a failed
+        # or timed-out ffmpeg would strand the file we just made — enough of
+        # them and /tmp fills, taking down transcription for unrelated jobs.
+        try:
+            os.remove(wav_path)
+        except OSError:
+            pass
+        raise
     return wav_path
 
 

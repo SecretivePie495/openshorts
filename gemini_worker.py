@@ -530,6 +530,12 @@ def generate_with_capacity_chain(client, model_name, *, contents, config=None,
     body, and only an in-loop check turns that into a second chance
     (prod 22-jul-2026). Returns ``(validate(response) or response, winner)``
     — the cost row must name the model that ANSWERED, not the one asked.
+
+    ``config`` may be a callable taking the model name. Some config fields
+    are family-specific (thinking_level is Gemini-3-only), and a config
+    built for the primary would earn a 400 on a 2.5 sibling — which is not
+    transient, so it would abort the whole chain during exactly the capacity
+    jam it exists to survive.
     """
     attempts = budget or int(os.environ.get("GEMINI_STAGE_RETRIES", "6"))
     chain = _available_chain(_model_chain(model_name), now())
@@ -545,7 +551,8 @@ def generate_with_capacity_chain(client, model_name, *, contents, config=None,
         for attempt in range(1, attempts + 1):
             try:
                 response = client.models.generate_content(
-                    model=model, contents=contents, config=config)
+                    model=model, contents=contents,
+                    config=config(model) if callable(config) else config)
                 return (validate(response) if validate else response), model
             except GeminiBlockedError:
                 raise
@@ -588,6 +595,23 @@ def _get_response_text(response) -> str:
             if part_text:
                 parts.append(part_text)
     return "\n".join(parts).strip()
+
+
+def parse_json_response(response):
+    """Block check + JSON parse, shaped as a ``validate`` callback.
+
+    Pass this to ``generate_with_capacity_chain`` so parsing happens INSIDE
+    the attempt loop: Gemini sometimes answers 200 with an empty or
+    unparseable body, and only an in-loop parse turns that into another try
+    instead of a lost stage (prod 22-jul-2026). A policy block still raises
+    on the spot — that verdict is the same on every model.
+    """
+    raise_if_blocked(response)
+    parsed_obj = getattr(response, "parsed", None)
+    if parsed_obj is not None:
+        return (parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump")
+                else parsed_obj)
+    return _parse_json_response_text(_get_response_text(response))
 
 
 def _calculate_cost_analysis(response, model_name: str) -> Optional[dict]:
@@ -683,7 +707,10 @@ def main() -> int:
 
     model_name = args.model
     client = genai.Client(api_key=api_key)
-    config = _config_for_strategy(args.strategy, args.mode, model_name)
+
+    def config(model):
+        return _config_for_strategy(args.strategy, args.mode, model)
+
     language = str(payload.get("language") or "unknown")
 
     template = SCORE_PROMPT_TEMPLATE if args.mode == "score" else DETAIL_PROMPT_TEMPLATE
@@ -702,22 +729,11 @@ def main() -> int:
 
     _log(f"🤖 Gemini worker request: mode={args.mode} strategy={args.strategy} model={model_name} items={len(payload.get('windows', []))}")
 
-    def _check(response):
-        # In-loop so a policy block aborts instantly and an empty 200 body
-        # costs a retry, not the job.
-        raise_if_blocked(response)
-        raw_text = _get_response_text(response)
-        parsed_obj = getattr(response, "parsed", None)
-        if parsed_obj is not None:
-            return parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
-        return _parse_json_response_text(raw_text)
-
-    box = {}
-    box["resp"] = None
+    box = {"resp": None}
 
     def _validate(response):
         box["resp"] = response
-        return _check(response)
+        return parse_json_response(response)
 
     parsed, winner = generate_with_capacity_chain(
         client, model_name, contents=prompt, config=config, where=args.mode,
