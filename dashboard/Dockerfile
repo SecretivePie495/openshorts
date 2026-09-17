@@ -15,6 +15,10 @@ CMD ["npm", "run", "dev", "--", "--host"]
 FROM node:18-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
+# BUST_CACHE is a no-op trigger pushed manually to invalidate Railway's layer
+# cache when stale node_modules from an older React/scheduler version are cached.
+ARG BUST_CACHE=""
+ENV BUST_CACHE=$BUST_CACHE
 RUN npm install
 COPY . .
 # Vite bakes env at BUILD time. Set VITE_API_URL to the backend's public URL
