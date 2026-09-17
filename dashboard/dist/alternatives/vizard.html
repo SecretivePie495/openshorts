@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Free &amp; Open Source Vizard Alternative | OpenShorts</title>
+<meta name="description" content="OpenShorts vs Vizard, compared feature by feature with current pricing. Self-hosted is free and open source; hosted starts at $12/month. Vizard starts at $19.99/month.">
+<link rel="canonical" href="https://www.openshorts.app/alternatives/vizard">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<link rel="icon" type="image/png" href="/logo-openshorts.png">
+<link rel="stylesheet" href="/fonts.css">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://www.openshorts.app/alternatives/vizard">
+<meta property="og:title" content="Free &amp; Open Source Vizard Alternative | OpenShorts">
+<meta property="og:description" content="OpenShorts vs Vizard, compared feature by feature with current pricing. Self-hosted is free and open source; hosted starts at $12/month. Vizard starts at $19.99/month.">
+<meta property="og:image" content="https://www.openshorts.app/og-image.png">
+<meta property="og:site_name" content="OpenShorts">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Free &amp; Open Source Vizard Alternative | OpenShorts">
+<meta name="twitter:description" content="OpenShorts vs Vizard, compared feature by feature with current pricing. Self-hosted is free and open source; hosted starts at $12/month. Vizard starts at $19.99/month.">
+<meta name="twitter:image" content="https://www.openshorts.app/og-image.png">
+<style>
+:root{
+  --paper:oklch(13% 0.014 265);--paper2:oklch(16.5% 0.015 265);--paper3:oklch(20% 0.016 265);
+  --ink:oklch(96% 0.006 262);--ink2:oklch(86% 0.01 262);--muted:oklch(64% 0.012 262);
+  --rule:oklch(96% 0.006 262 / .08);--rule2:oklch(96% 0.006 262 / .14);
+  --brass:oklch(76% 0.17 50);--ok:oklch(75% 0.11 150);
+  --display:"Instrument Serif",ui-serif,Georgia,serif;
+  --body:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink2);font-family:var(--body);
+  font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+a{color:var(--ink2);text-decoration:underline;text-underline-offset:3px;
+  text-decoration-color:var(--rule2)}
+a:hover{color:var(--ink);text-decoration-color:var(--brass)}
+.wrap{max-width:56rem;margin:0 auto;padding:0 1.5rem}
+header.site{border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--paper);z-index:10}
+header.site .wrap{display:flex;align-items:center;justify-content:space-between;
+  gap:1rem;height:4rem}
+.brand{display:flex;align-items:center;gap:.6rem;font-family:var(--display);
+  font-size:1.15rem;color:var(--ink);text-transform:lowercase;text-decoration:none}
+.brand img{width:26px;height:26px}
+.nav{display:flex;gap:1.25rem;font-size:.875rem;text-transform:lowercase}
+.nav a{text-decoration:none;color:var(--muted)}
+.nav a:hover{color:var(--ink)}
+.cta{background:var(--brass);color:oklch(17% 0.03 50);padding:.5rem 1rem;
+  border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;white-space:nowrap}
+main{padding:3rem 0 4rem}
+.crumbs{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:1.5rem}
+.crumbs a{text-decoration:none;color:var(--muted)}
+.crumbs a:hover{color:var(--brass)}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(2.1rem,4.5vw,3.2rem);
+  line-height:1.08;letter-spacing:-.03em;color:var(--ink);margin:0 0 1rem}
+h2{font-family:var(--display);font-weight:400;font-size:clamp(1.5rem,2.6vw,2rem);
+  line-height:1.15;letter-spacing:-.02em;color:var(--ink);margin:3rem 0 .85rem}
+h3{font-size:1.05rem;font-weight:600;color:var(--ink);margin:2rem 0 .5rem}
+p{margin:0 0 1.1rem}
+.byline{font-size:.8rem;color:var(--muted);border-bottom:1px solid var(--rule);
+  padding-bottom:1.5rem;margin-bottom:2rem}
+.byline .sep{opacity:.4;margin:0 .5rem}
+.shot{margin:1.6rem 0}
+.shot img{width:100%;height:auto;display:block;border:1px solid var(--rule2);border-radius:8px}
+.shot figcaption{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+.tldr{background:var(--paper2);border:1px solid var(--rule2);border-left:3px solid var(--brass);
+  border-radius:10px;padding:1.4rem 1.5rem;margin:0 0 2.5rem}
+.tldr .label{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--brass);display:block;margin-bottom:.6rem}
+.tldr p{margin:0 0 .7rem;color:var(--ink2)}
+.tldr p:last-child{margin-bottom:0}
+ul,ol{margin:0 0 1.1rem;padding-left:1.25rem}
+li{margin-bottom:.45rem}
+table{width:100%;border-collapse:collapse;margin:1.25rem 0 1.5rem;font-size:.9rem;
+  display:block;overflow-x:auto;white-space:nowrap}
+@media(min-width:52rem){table{display:table;white-space:normal}}
+th,td{text-align:left;padding:.7rem .9rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:.7rem;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);font-weight:500}
+td.os{color:var(--ink)}
+.yes{color:var(--ok)}
+.note{border:1px solid var(--rule2);border-radius:10px;padding:1.1rem 1.25rem;
+  margin:1.5rem 0;background:var(--paper2)}
+.note .label{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);display:block;margin-bottom:.5rem}
+.note p:last-child{margin-bottom:0}
+.checked{font-family:var(--mono);font-size:.7rem;color:var(--muted);
+  letter-spacing:.05em;margin-bottom:1.5rem}
+.faq dt{font-weight:600;color:var(--ink);margin-top:1.75rem}
+.faq dd{margin:.5rem 0 0}
+.sources{font-size:.85rem;color:var(--muted)}
+.sources li{margin-bottom:.35rem}
+.cluster{display:grid;gap:.75rem;grid-template-columns:1fr;margin:1.25rem 0}
+@media(min-width:40rem){.cluster{grid-template-columns:1fr 1fr}}
+.cluster a{display:block;border:1px solid var(--rule);border-radius:10px;padding:.9rem 1.1rem;
+  text-decoration:none;background:var(--paper2)}
+.cluster a:hover{border-color:var(--rule2)}
+.cluster strong{display:block;color:var(--ink);font-weight:500;margin-bottom:.15rem}
+.cluster span{font-size:.85rem;color:var(--muted)}
+footer.site{border-top:1px solid var(--rule);padding:2.5rem 0;font-size:.85rem;color:var(--muted)}
+footer.site a{color:var(--muted)}
+footer.site .row{display:flex;flex-wrap:wrap;gap:1.25rem;margin-bottom:1rem}
+</style>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://www.openshorts.app/#organization","name":"OpenShorts","url":"https://www.openshorts.app","logo":{"@type":"ImageObject","url":"https://www.openshorts.app/logo-openshorts.png"},"sameAs":["https://github.com/mutonby/openshorts","https://www.aitoolnet.com/openshorts","https://creatorstoolbox.com/tools/openshorts"]},{"@type":"BreadcrumbList","@id":"https://www.openshorts.app/alternatives/vizard#breadcrumb","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.openshorts.app"},{"@type":"ListItem","position":2,"name":"Alternatives","item":"https://www.openshorts.app/alternatives"},{"@type":"ListItem","position":3,"name":"Vizard"}]},{"@type":"Article","@id":"https://www.openshorts.app/alternatives/vizard#article","headline":"The free, open source Vizard alternative","description":"OpenShorts vs Vizard, compared feature by feature with current pricing. Self-hosted is free and open source; hosted starts at $12/month. Vizard starts at $19.99/month.","datePublished":"2024-06-01","dateModified":"2026-08-04","inLanguage":"en-US","mainEntityOfPage":"https://www.openshorts.app/alternatives/vizard","author":{"@id":"https://www.openshorts.app/#organization"},"publisher":{"@id":"https://www.openshorts.app/#organization"},"image":"https://www.openshorts.app/og-image.png"},{"@type":"FAQPage","@id":"https://www.openshorts.app/alternatives/vizard#faq","mainEntity":[{"@type":"Question","name":"Is there a free alternative to Vizard?","acceptedAnswer":{"@type":"Answer","text":"Yes. OpenShorts self-hosted is free and open source under MIT, with no watermark and no usage cap. OpenShorts Cloud has a free tier of 20 minutes a month and paid plans from $12/month. Vizard starts at $19.99/month."}},{"@type":"Question","name":"Is there an open source alternative to Vizard?","acceptedAnswer":{"@type":"Answer","text":"OpenShorts is MIT-licensed with full source on GitHub. Vizard is closed source."}},{"@type":"Question","name":"Does OpenShorts put a watermark on clips?","acceptedAnswer":{"@type":"Answer","text":"Self-hosted, never. On OpenShorts Cloud the free 20-minute tier is watermarked and every paid plan from $12/month is not."}}]}]}</script>
+</head>
+<body>
+
+<header class="site"><div class="wrap">
+  <a class="brand" href="https://www.openshorts.app/"><img src="/logo-openshorts.png" alt="OpenShorts logo" width="26" height="26">OpenShorts</a>
+  <nav class="nav">
+    <a href="/free-ai-clip-generator">Clip generator</a>
+    <a href="/alternatives">Alternatives</a>
+    <a href="/mcp">MCP &amp; API</a>
+    <a href="https://github.com/mutonby/openshorts" rel="noopener">GitHub</a>
+  </nav>
+  <a class="cta" href="https://www.openshorts.app/">Get free clips</a>
+</div></header>
+<main><div class="wrap">
+<div class="crumbs"><a href="https://www.openshorts.app/">Home</a> <span aria-hidden="true">/</span> <a href="/alternatives">Alternatives</a> <span aria-hidden="true">/</span> Vizard</div>
+<h1>The free, open source Vizard alternative</h1>
+<div class="byline">
+  By the OpenShorts team<span class="sep">·</span>
+  Published <time datetime="2024-06-01">2024-06-01</time><span class="sep">·</span>
+  Updated <time datetime="2026-08-04">2026-08-04</time>
+</div>
+<div class="tldr"><span class="label">TL;DR</span><p>OpenShorts is an open source AI clip generator you can run yourself for free, or use hosted from $12/month. Vizard is a closed-source cloud product starting at $19.99/month.</p><p>Both find viral moments in long video and reframe them to 9:16 with face tracking. OpenShorts adds dubbing into 30+ languages and AI UGC video with lip-synced actors. Vizard has the more polished caption library.</p><p>Pick Vizard if you want zero setup and nothing else matters. Pick OpenShorts if you want to self-host for privacy, keep costs near zero, or change how the pipeline behaves.</p></div>
+
+<h2>Is OpenShorts a real alternative to Vizard?</h2>
+<p>Yes, with one honest caveat. OpenShorts covers the same core job:
+it takes a long video, finds the segments worth clipping, cuts them, reframes
+them to 9:16 and burns in subtitles. It adds two things Vizard does not
+have, AI voice dubbing into more than 30 languages and an AI UGC generator with
+lip-synced actors. The caveat is that the free edition is self-hosted, which
+means Docker and a machine to run it on. If you want a hosted product with no
+setup, that is OpenShorts Cloud, and it is a paid service above 20 minutes a month.</p>
+
+<h2>What does Vizard cost?</h2>
+<p class="checked">Pricing checked 2026-07-27. Vendors change plans without notice; verify before you buy.</p>
+<ul><li><strong>Creator and higher tiers</strong>: From $19.99/month, scaling by minutes processed</li></ul>
+<div class="note"><span class="label">The part that catches people out</span><p>Vizard is built around a browser editing timeline, so it sits between a pure auto-clipper and a full editor. That is useful if you intend to hand-adjust every clip, and overhead if you do not.</p></div>
+
+<h2>What does OpenShorts cost?</h2>
+
+<p>OpenShorts comes in two editions and they are priced very differently, so it
+is worth being precise. <strong>OpenShorts (self-hosted)</strong> is free
+and open source under the MIT licence: Free and open source under MIT. You run it with Docker on your own machine and bring your own API keys. No watermark, no usage cap, no subscription. What it costs you is hardware and time: on a typical CPU an 8-minute video takes 5 to 8 minutes to process.
+<strong>OpenShorts Cloud</strong> is the hosted service:
+The same software with the compute and API keys covered. An NVIDIA GPU clips that same 8-minute video in about 50 seconds. Free plan is 20 minutes a month with a watermark and no credit card. Paid plans start at $12/month for 100 minutes with no watermark, up to $59/month.</p>
+
+<h2>Vizard vs OpenShorts, feature by feature</h2>
+<table>
+<thead><tr><th>Feature</th><th>OpenShorts</th><th>Vizard</th></tr></thead>
+<tbody><tr><td>Entry price</td><td class="os">$0 self-hosted · $0 hosted for 20 min/mo · $12/mo hosted without watermark</td><td>$19.99/month</td></tr><tr><td>Open source</td><td class="os">Yes, MIT</td><td>No</td></tr><tr><td>Self-hostable</td><td class="os">Yes, Docker Compose</td><td>No, cloud only</td></tr><tr><td>Source video stays on your machine</td><td class="os">Yes when self-hosted</td><td>No</td></tr><tr><td>AI viral moment detection</td><td class="os">Yes, Gemini 3.1 Flash-Lite</td><td>Yes</td></tr><tr><td>Face-tracked 9:16 reframing</td><td class="os">Yes, MediaPipe + YOLOv8</td><td>Yes</td></tr><tr><td>Word-level auto subtitles</td><td class="os">Yes, faster-whisper</td><td>Yes</td></tr><tr><td>AI voice dubbing, 30+ languages</td><td class="os">Yes, ElevenLabs</td><td>No</td></tr><tr><td>AI UGC video with lip-synced actors</td><td class="os">Yes, from $0.65/video</td><td>No</td></tr><tr><td>Free AI YouTube thumbnail &amp; title studio</td><td class="os">Yes</td><td>No</td></tr><tr><td>Usage cap</td><td class="os">None when self-hosted · metered on Cloud</td><td>Metered on every tier</td></tr></tbody>
+</table>
+
+<h2>What Vizard does better</h2>
+<p>A comparison that finds nothing good to say about the other tool is not worth
+reading, so here is where Vizard genuinely wins:</p>
+<ul><li>Genuinely usable in-browser editor after the AI pass</li><li>Strong multi-language subtitle support</li></ul>
+
+<h2>Where the two differ</h2>
+<ul><li>OpenShorts runs the whole pipeline unattended and is designed to be scripted or scheduled; Vizard expects a human in the timeline.</li><li>OpenShorts is open source and self-hostable; Vizard is a closed cloud product.</li><li>Vizard's editor is better than ours if you want to hand-correct each clip before posting.</li></ul>
+
+<h2>Which one should you pick?</h2>
+<p>Vizard is the better pick if you plan to manually refine every clip in a timeline. OpenShorts is the better pick for volume, automation, or self-hosting.</p>
+
+<h2>Common questions</h2><dl class="faq"><dt>Is there a free alternative to Vizard?</dt><dd>Yes. OpenShorts self-hosted is free and open source under MIT, with no watermark and no usage cap, and it runs on your own machine with Docker. OpenShorts Cloud also has a free tier of 20 minutes a month with a watermark and no credit card. Vizard starts at $19.99/month.</dd><dt>Is there an open source alternative to Vizard?</dt><dd>OpenShorts is MIT-licensed and the full source is on GitHub at github.com/mutonby/openshorts. Vizard is closed source. Being able to read the pipeline matters if you need to audit what happens to your video or change how the reframing behaves.</dd><dt>Can I switch from Vizard without losing quality?</dt><dd>The pipelines are comparable on the core job. OpenShorts transcribes with faster-whisper at word level, detects scenes with PySceneDetect, and scores moments with Google Gemini 3.1 Flash-Lite, then reframes with MediaPipe face tracking stabilised against jitter. The honest difference is caption styling, where the commercial tools generally ship more presets.</dd><dt>Does OpenShorts put a watermark on clips?</dt><dd>Self-hosted, never. On OpenShorts Cloud the free 20-minute tier is watermarked; every paid plan from $12/month is not.</dd></dl>
+
+<h2>Sources</h2><ul class="sources"><li>Vizard pricing, checked 2026-07-27 on the vendor's public pricing page.</li><li>OpenShorts pipeline details from the project source at <a href="https://github.com/mutonby/openshorts" rel="noopener">github.com/mutonby/openshorts</a>.</li></ul>
+
+<h2>Related comparisons</h2><div class="cluster"><a href="/alternatives/submagic"><strong>The free, open source Submagic alternative</strong><span>Captions only, so it does not replace a clipper.</span></a><a href="/free-ai-clip-generator"><strong>A free AI clip generator that is actually free</strong><span>What free means when there is no metering code.</span></a><a href="/free-ai-clip-generator-no-watermark"><strong>A free AI clip generator with no watermark, and why that is rare</strong><span>Why free tools watermark, and the structural exception.</span></a></div>
+</div></main>
+
+<footer class="site"><div class="wrap">
+  <div class="row">
+    <a href="https://www.openshorts.app/">OpenShorts</a>
+    <a href="https://github.com/mutonby/openshorts" rel="noopener">Source on GitHub</a>
+    <a href="/free-ai-clip-generator">Free AI clip generator</a>
+    <a href="/free-ai-clip-generator-no-watermark">No-watermark clip generator</a>
+    <a href="/open-source-video-clipper">Open source video clipper</a>
+    <a href="/open-source-ai-video-generator">Open source AI video generator</a>
+    <a href="/podcast-to-shorts">Podcast to shorts</a>
+    <a href="/youtube-to-shorts-converter">YouTube to Shorts converter</a>
+    <a href="/how-openshorts-works">How it works</a>
+    <a href="/alternatives">Alternatives compared</a>
+    <a href="/mcp">MCP server and API</a>
+    <a href="/automate-shorts-api">Automate shorts</a>
+  </div>
+  <p>OpenShorts self-hosted is free and open source under MIT. OpenShorts Cloud
+  is the hosted service: 20 free minutes a month, paid plans from $12/month.
+  Last updated 2026-08-04.</p>
+</div></footer>
+</body>
+</html>

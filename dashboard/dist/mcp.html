@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Automate Video Clipping with AI Agents: MCP Server, API &amp; Webhooks | OpenShorts</title>
+<meta name="description" content="OpenShorts ships a built-in MCP server, so Claude, ChatGPT, Cursor or n8n can clip and publish videos for you. REST API with keys, completion webhooks, self-hostable. Hosted from $12/month.">
+<link rel="canonical" href="https://www.openshorts.app/mcp">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<link rel="icon" type="image/png" href="/logo-openshorts.png">
+<link rel="stylesheet" href="/fonts.css">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://www.openshorts.app/mcp">
+<meta property="og:title" content="Automate Video Clipping with AI Agents: MCP Server, API &amp; Webhooks | OpenShorts">
+<meta property="og:description" content="OpenShorts ships a built-in MCP server, so Claude, ChatGPT, Cursor or n8n can clip and publish videos for you. REST API with keys, completion webhooks, self-hostable. Hosted from $12/month.">
+<meta property="og:image" content="https://www.openshorts.app/og-image.png">
+<meta property="og:site_name" content="OpenShorts">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Automate Video Clipping with AI Agents: MCP Server, API &amp; Webhooks | OpenShorts">
+<meta name="twitter:description" content="OpenShorts ships a built-in MCP server, so Claude, ChatGPT, Cursor or n8n can clip and publish videos for you. REST API with keys, completion webhooks, self-hostable. Hosted from $12/month.">
+<meta name="twitter:image" content="https://www.openshorts.app/og-image.png">
+<style>
+:root{
+  --paper:oklch(13% 0.014 265);--paper2:oklch(16.5% 0.015 265);--paper3:oklch(20% 0.016 265);
+  --ink:oklch(96% 0.006 262);--ink2:oklch(86% 0.01 262);--muted:oklch(64% 0.012 262);
+  --rule:oklch(96% 0.006 262 / .08);--rule2:oklch(96% 0.006 262 / .14);
+  --brass:oklch(76% 0.17 50);--ok:oklch(75% 0.11 150);
+  --display:"Instrument Serif",ui-serif,Georgia,serif;
+  --body:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink2);font-family:var(--body);
+  font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+a{color:var(--ink2);text-decoration:underline;text-underline-offset:3px;
+  text-decoration-color:var(--rule2)}
+a:hover{color:var(--ink);text-decoration-color:var(--brass)}
+.wrap{max-width:56rem;margin:0 auto;padding:0 1.5rem}
+header.site{border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--paper);z-index:10}
+header.site .wrap{display:flex;align-items:center;justify-content:space-between;
+  gap:1rem;height:4rem}
+.brand{display:flex;align-items:center;gap:.6rem;font-family:var(--display);
+  font-size:1.15rem;color:var(--ink);text-transform:lowercase;text-decoration:none}
+.brand img{width:26px;height:26px}
+.nav{display:flex;gap:1.25rem;font-size:.875rem;text-transform:lowercase}
+.nav a{text-decoration:none;color:var(--muted)}
+.nav a:hover{color:var(--ink)}
+.cta{background:var(--brass);color:oklch(17% 0.03 50);padding:.5rem 1rem;
+  border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;white-space:nowrap}
+main{padding:3rem 0 4rem}
+.crumbs{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:1.5rem}
+.crumbs a{text-decoration:none;color:var(--muted)}
+.crumbs a:hover{color:var(--brass)}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(2.1rem,4.5vw,3.2rem);
+  line-height:1.08;letter-spacing:-.03em;color:var(--ink);margin:0 0 1rem}
+h2{font-family:var(--display);font-weight:400;font-size:clamp(1.5rem,2.6vw,2rem);
+  line-height:1.15;letter-spacing:-.02em;color:var(--ink);margin:3rem 0 .85rem}
+h3{font-size:1.05rem;font-weight:600;color:var(--ink);margin:2rem 0 .5rem}
+p{margin:0 0 1.1rem}
+.byline{font-size:.8rem;color:var(--muted);border-bottom:1px solid var(--rule);
+  padding-bottom:1.5rem;margin-bottom:2rem}
+.byline .sep{opacity:.4;margin:0 .5rem}
+.shot{margin:1.6rem 0}
+.shot img{width:100%;height:auto;display:block;border:1px solid var(--rule2);border-radius:8px}
+.shot figcaption{font-size:.85rem;color:var(--muted);margin-top:.5rem}
+.tldr{background:var(--paper2);border:1px solid var(--rule2);border-left:3px solid var(--brass);
+  border-radius:10px;padding:1.4rem 1.5rem;margin:0 0 2.5rem}
+.tldr .label{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--brass);display:block;margin-bottom:.6rem}
+.tldr p{margin:0 0 .7rem;color:var(--ink2)}
+.tldr p:last-child{margin-bottom:0}
+ul,ol{margin:0 0 1.1rem;padding-left:1.25rem}
+li{margin-bottom:.45rem}
+table{width:100%;border-collapse:collapse;margin:1.25rem 0 1.5rem;font-size:.9rem;
+  display:block;overflow-x:auto;white-space:nowrap}
+@media(min-width:52rem){table{display:table;white-space:normal}}
+th,td{text-align:left;padding:.7rem .9rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:.7rem;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);font-weight:500}
+td.os{color:var(--ink)}
+.yes{color:var(--ok)}
+.note{border:1px solid var(--rule2);border-radius:10px;padding:1.1rem 1.25rem;
+  margin:1.5rem 0;background:var(--paper2)}
+.note .label{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);display:block;margin-bottom:.5rem}
+.note p:last-child{margin-bottom:0}
+.checked{font-family:var(--mono);font-size:.7rem;color:var(--muted);
+  letter-spacing:.05em;margin-bottom:1.5rem}
+.faq dt{font-weight:600;color:var(--ink);margin-top:1.75rem}
+.faq dd{margin:.5rem 0 0}
+.sources{font-size:.85rem;color:var(--muted)}
+.sources li{margin-bottom:.35rem}
+.cluster{display:grid;gap:.75rem;grid-template-columns:1fr;margin:1.25rem 0}
+@media(min-width:40rem){.cluster{grid-template-columns:1fr 1fr}}
+.cluster a{display:block;border:1px solid var(--rule);border-radius:10px;padding:.9rem 1.1rem;
+  text-decoration:none;background:var(--paper2)}
+.cluster a:hover{border-color:var(--rule2)}
+.cluster strong{display:block;color:var(--ink);font-weight:500;margin-bottom:.15rem}
+.cluster span{font-size:.85rem;color:var(--muted)}
+footer.site{border-top:1px solid var(--rule);padding:2.5rem 0;font-size:.85rem;color:var(--muted)}
+footer.site a{color:var(--muted)}
+footer.site .row{display:flex;flex-wrap:wrap;gap:1.25rem;margin-bottom:1rem}
+</style>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://www.openshorts.app/#organization","name":"OpenShorts","url":"https://www.openshorts.app","logo":{"@type":"ImageObject","url":"https://www.openshorts.app/logo-openshorts.png"},"sameAs":["https://github.com/mutonby/openshorts","https://www.aitoolnet.com/openshorts","https://creatorstoolbox.com/tools/openshorts"]},{"@type":"BreadcrumbList","@id":"https://www.openshorts.app/mcp#breadcrumb","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.openshorts.app"},{"@type":"ListItem","position":2,"name":"MCP server and API"}]},{"@type":"Article","@id":"https://www.openshorts.app/mcp#article","headline":"Clip and publish video from an AI agent","description":"OpenShorts ships a built-in MCP server, so Claude, ChatGPT, Cursor or n8n can clip and publish videos for you. REST API with keys, completion webhooks, self-hostable. Hosted from $12/month.","datePublished":"2024-06-01","dateModified":"2026-08-04","inLanguage":"en-US","mainEntityOfPage":"https://www.openshorts.app/mcp","author":{"@id":"https://www.openshorts.app/#organization"},"publisher":{"@id":"https://www.openshorts.app/#organization"},"image":"https://www.openshorts.app/og-image.png"},{"@type":"FAQPage","@id":"https://www.openshorts.app/mcp#faq","mainEntity":[{"@type":"Question","name":"Does OpenShorts have an MCP server?","acceptedAnswer":{"@type":"Answer","text":"Yes, a native MCP server at mcp.openshorts.app/mcp with six tools covering the full pipeline, authenticated with an API key created in the dashboard."}},{"@type":"Question","name":"Can Claude or ChatGPT create video clips with OpenShorts?","acceptedAnswer":{"@type":"Answer","text":"Yes. Any MCP-capable client can connect with an API key and drive the whole flow from video URL to published clip."}},{"@type":"Question","name":"Do API calls cost extra?","acceptedAnswer":{"@type":"Answer","text":"No. API and MCP usage draws from the same minute balance as the dashboard: 20 free minutes a month on the hosted free tier, paid plans from $12/month, and the self-hosted edition is free under MIT."}},{"@type":"Question","name":"How is this different from the Opus Clip MCP server?","acceptedAnswer":{"@type":"Answer","text":"Similar tool surface, different billing and deployment: Opus Clip meters MCP usage in credits per source minute that expire in 60 days, while OpenShorts draws from a flat minute balance, and only OpenShorts can run the same MCP server self-hosted and unmetered."}}]}]}</script>
+</head>
+<body>
+
+<header class="site"><div class="wrap">
+  <a class="brand" href="https://www.openshorts.app/"><img src="/logo-openshorts.png" alt="OpenShorts logo" width="26" height="26">OpenShorts</a>
+  <nav class="nav">
+    <a href="/free-ai-clip-generator">Clip generator</a>
+    <a href="/alternatives">Alternatives</a>
+    <a href="/mcp">MCP &amp; API</a>
+    <a href="https://github.com/mutonby/openshorts" rel="noopener">GitHub</a>
+  </nav>
+  <a class="cta" href="https://www.openshorts.app/">Get free clips</a>
+</div></header>
+<main><div class="wrap">
+<div class="crumbs"><a href="https://www.openshorts.app/">Home</a> <span aria-hidden="true">/</span> MCP server and API</div>
+<h1>Clip and publish video from an AI agent</h1>
+<div class="byline">
+  By the OpenShorts team<span class="sep">·</span>
+  Published <time datetime="2024-06-01">2024-06-01</time><span class="sep">·</span>
+  Updated <time datetime="2026-08-04">2026-08-04</time>
+</div>
+<div class="tldr"><span class="label">TL;DR</span><p>OpenShorts has a native MCP server at mcp.openshorts.app/mcp. Connect any MCP client, Claude, ChatGPT, Cursor or a custom agent, and a prompt like "clip this podcast and schedule the best three to TikTok" becomes one instruction instead of an afternoon in an editor.</p><p>Eight tools cover the whole pipeline: process_video, create_upload, get_job_status, list_clips, get_quota, add_subtitles, recut_clip and publish_clip. There is also a plain REST API with per-user keys, and completion webhooks so pipelines never poll.</p><p>The difference that survives comparison shopping is the meter. Most clipping tools now have an API, and Opus Clip added an MCP server in July 2026, but they meter agent calls per source minute or per operation. OpenShorts API calls draw from the same flat minute balance as the dashboard, and the self-hosted edition, free and MIT-licensed, serves the same MCP endpoint with no meter at all.</p></div>
+
+<h2>What can an agent actually do with OpenShorts?</h2>
+<p>Everything the dashboard does. The MCP server is not a wrapper around a
+subset of features: each tool calls the same pipeline the web app uses, with the
+same account, the same minutes and the same job history. An agent can take a
+YouTube URL, turn it into 3 to 15 vertical clips with word-level captions,
+restyle those captions, and publish or schedule the result to TikTok, Instagram
+Reels and YouTube Shorts.</p>
+
+<h2>How do I connect Claude or ChatGPT?</h2>
+<p>With the URL alone. The server implements OAuth 2.1 with dynamic client
+registration, which is what claude.ai and ChatGPT expect from a remote MCP
+server, so there is no key to copy:</p>
+<ol>
+<li><strong>claude.ai:</strong> Settings, Connectors, Add custom connector, paste <code>https://mcp.openshorts.app/mcp</code>, Connect.</li>
+<li><strong>ChatGPT:</strong> Settings, Connectors, Create, paste the same URL, choose OAuth.</li>
+<li>Approve the access on openshorts.app (sign in if you are not). The 8 tools appear in every chat, and the connection is listed under Account, API keys, where revoking it disconnects the app.</li>
+</ol>
+<h2>How do I connect Claude Code, Cursor or n8n?</h2>
+<p>CLI and workflow clients take an API key instead: create one in your account
+page (shown once, starts with <code>osk_</code>) and pass it as a Bearer
+token. With Claude Code:</p>
+<pre><code>claude mcp add --transport http openshorts https://mcp.openshorts.app/mcp \
+  --header "Authorization: Bearer osk_..."</code></pre>
+<p>Any client that speaks Streamable HTTP works the same way: the endpoint is
+<code>https://mcp.openshorts.app/mcp</code>, the server describes itself over
+the protocol, tool schemas included, and the account page has copy-ready
+snippets for Claude Desktop, Cursor, n8n and curl.</p>
+
+<h2>What tools does the MCP server expose?</h2>
+<table>
+<thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>process_video</code></td><td>Starts clipping a video from a URL or an upload_id. Returns a job id immediately; processing takes minutes. Pass captions: true to burn word-level subtitles (off by default), auto_hook: false to skip the hook line (on by default).</td></tr>
+<tr><td><code>create_upload</code></td><td>Reserves an upload slot for a local file: the agent PUTs the bytes to the returned URL, then processes it by upload_id.</td></tr>
+<tr><td><code>get_job_status</code></td><td>Progress, recent log lines, and the clips once the job completes.</td></tr>
+<tr><td><code>list_clips</code></td><td>Titles, durations, platform-ready descriptions and download URLs for a finished job.</td></tr>
+<tr><td><code>get_quota</code></td><td>Plan and remaining minutes, so an agent can check before starting a large job.</td></tr>
+<tr><td><code>add_subtitles</code></td><td>Restyles the burned-in captions of one clip, classic or karaoke word highlighting.</td></tr>
+<tr><td><code>publish_clip</code></td><td>Posts or schedules one clip to TikTok, Instagram or YouTube through the connected account.</td></tr>
+</tbody>
+</table>
+<p>In clients that support the MCP Apps extension (ChatGPT apps, mcp-ui hosts),
+<code>list_clips</code> also renders as an interactive clip picker: preview each
+9:16 clip inline, select the keepers and publish them without leaving the
+conversation. Clients without UI support see the same data as plain results.</p>
+
+<h2>How does this compare to the other clipping tools' agent access?</h2>
+<p class="checked">Checked 2026-08-04 on vendor developer documentation and pricing pages. This market is moving fast; verify before committing a pipeline.</p>
+<p>Agent access stopped being exclusive in 2026: Opus Clip launched its own MCP
+server in July, Reap ships MCP plus a CLI, and Klap, Vizard and Submagic have
+REST APIs. A comparison that pretended otherwise would not deserve your trust.
+What still separates the offerings is how agent calls are billed and where the
+server can run:</p>
+<table>
+<thead><tr><th>Tool</th><th>MCP server</th><th>REST API</th><th>How agent calls are billed</th></tr></thead>
+<tbody>
+<tr><td class="os">OpenShorts</td><td class="os yes">Yes, hosted and self-hosted</td><td class="os yes">Yes, with signed webhooks</td><td class="os">Same flat minute balance as the dashboard; self-hosted has no meter</td></tr>
+<tr><td>Opus Clip</td><td class="yes">Yes, since July 2026</td><td>Yes</td><td>Credits per source minute, expiring in 60 days</td></tr>
+<tr><td>Reap</td><td class="yes">Yes, plus CLI</td><td>Yes</td><td>Subscription from $9.99/month, metered minutes</td></tr>
+<tr><td>Klap</td><td>No</td><td>Yes</td><td>Per operation, roughly $0.32 to $0.48 each</td></tr>
+<tr><td>Vizard</td><td>No</td><td>Yes, with webhooks</td><td>Consumes plan upload minutes</td></tr>
+<tr><td>Submagic</td><td>No</td><td>Yes, Business tier ($69/month)</td><td>Metered per minute on top of the tier</td></tr>
+</tbody>
+</table>
+<p>The consequence for an autonomous pipeline is simple: an agent loop on a
+metered API runs with the bill still attached to every decision it makes. On a
+flat plan the worst an agent can do is spend your minutes; on the self-hosted
+edition there is nothing to spend. For the recipe-shaped version of this,
+webhooks, n8n and cron, see <a href="/automate-shorts-api">automating shorts
+with the API</a>.</p>
+
+<h2>Can I use a plain REST API instead of MCP?</h2>
+<p>Yes. The same <code>osk_</code> key authenticates against the REST API, and
+interactive documentation lives at
+<a href="https://api.openshorts.app/docs" rel="noopener">api.openshorts.app/docs</a>
+with the OpenAPI spec at <code>/openapi.json</code>. A processing job is one
+request:</p>
+<pre><code>curl -X POST https://api.openshorts.app/api/process \
+  -H "Authorization: Bearer osk_..." -H "Content-Type: application/json" \
+  -d '{"url": "https://youtube.com/watch?v=...", "acknowledged": true,
+       "webhook_url": "https://your-server.com/hooks/openshorts"}'</code></pre>
+
+<h2>Is there a CLI?</h2>
+<p>Yes, a zero-dependency one on PyPI. It talks to the same REST surface as
+everything else, so the terminal, the dashboard and the agents can never
+disagree about what a job did:</p>
+<pre><code>pip install openshorts   # or: uvx openshorts
+
+export OPENSHORTS_API_KEY=osk_...
+openshorts process "https://youtube.com/watch?v=..." --wait
+openshorts clips &lt;job_id&gt;
+openshorts publish &lt;job_id&gt; 0 --platforms tiktok,youtube</code></pre>
+<p>Point <code>OPENSHORTS_API_URL</code> at <code>http://localhost:8000</code>
+and the same binary drives a self-hosted instance with no key.</p>
+
+<h2>How do completion webhooks work?</h2>
+<p>Pass <code>webhook_url</code> when starting a job and OpenShorts sends
+exactly one POST when the job finishes or fails, with clip titles and download
+links in the body. Add a <code>webhook_secret</code> and the body is signed with
+HMAC-SHA256 in the <code>X-OpenShorts-Signature</code> header so your receiver
+can verify the sender. This is what lets an n8n, Zapier or cron pipeline run
+without a polling loop.</p>
+
+<h2>Does this work on the self-hosted edition?</h2>
+<p>Yes. The self-hosted edition serves the same <code>/mcp</code> endpoint on
+your own machine, with no API key required because there is no account system:
+it follows the same bring-your-own-key rules as the rest of the self-hosted app.
+Point your MCP client at <code>http://localhost:8000/mcp</code> and the same six
+tools appear.</p>
+
+<h2>What does it cost?</h2>
+
+<p>OpenShorts comes in two editions and they are priced very differently, so it
+is worth being precise. <strong>OpenShorts (self-hosted)</strong> is free
+and open source under the MIT licence: Free and open source under MIT. You run it with Docker on your own machine and bring your own API keys. No watermark, no usage cap, no subscription. What it costs you is hardware and time: on a typical CPU an 8-minute video takes 5 to 8 minutes to process.
+<strong>OpenShorts Cloud</strong> is the hosted service:
+The same software with the compute and API keys covered. An NVIDIA GPU clips that same 8-minute video in about 50 seconds. Free plan is 20 minutes a month with a watermark and no credit card. Paid plans start at $12/month for 100 minutes with no watermark, up to $59/month.</p>
+<p>API and MCP calls are not billed separately: they draw from the same minute
+balance as the dashboard, so automation does not change the price of anything.</p>
+
+<h2>Common questions</h2><dl class="faq"><dt>Does OpenShorts have an MCP server?</dt><dd>Yes, a native one at mcp.openshorts.app/mcp using the Streamable HTTP transport. It exposes eight tools covering the full pipeline: process_video, create_upload, get_job_status, list_clips, get_quota, add_subtitles, recut_clip and publish_clip. Authentication is an API key created in the dashboard, sent as a Bearer token.</dd><dt>Can Claude or ChatGPT create video clips with OpenShorts?</dt><dd>Yes. Any MCP-capable client, including Claude and ChatGPT, can connect to mcp.openshorts.app/mcp with an API key and drive the whole flow: submit a video URL, wait for processing, list the generated clips and publish them to TikTok, Instagram or YouTube.</dd><dt>Is there an API for OpenShorts?</dt><dd>Yes, a REST API documented at api.openshorts.app/docs, authenticated with per-user osk_ keys created in the dashboard. It covers processing, status, subtitles, publishing and completion webhooks.</dd><dt>Do API calls cost extra?</dt><dd>No. API and MCP usage draws from the same minute balance as the dashboard: 20 free minutes a month on the hosted free tier, and paid plans from $12/month. The self-hosted edition is free under MIT and serves the same endpoints with no metering. Most competing APIs are billed per source minute or per operation on top of a subscription.</dd><dt>How is this different from the Opus Clip MCP server?</dt><dd>The tool surface is similar: both expose around six tools covering processing, captions and publishing. The differences are billing and deployment. Opus Clip meters MCP usage in credits per source minute, and those credits expire in 60 days; OpenShorts draws from a flat minute balance with no per-call pricing. And only OpenShorts can run the same MCP server on your own machine, unmetered, because the code is MIT-licensed.</dd></dl>
+
+<h2>Sources</h2><ul class="sources"><li>MCP specification and transports at <a href="https://modelcontextprotocol.io" rel="noopener">modelcontextprotocol.io</a>.</li><li>OpenShorts server implementation in the project source at <a href="https://github.com/mutonby/openshorts" rel="noopener">github.com/mutonby/openshorts</a>.</li></ul>
+
+<h2>Related comparisons</h2><div class="cluster"><a href="/automate-shorts-api"><strong>Automate shorts end to end: one request in, one webhook out</strong><span>One POST in, one signed webhook out, no polling.</span></a><a href="/n8n-youtube-shorts-automation"><strong>The n8n content machine: your channel clips itself, you approve from your phone</strong><span>The importable workflow: channel in, approved shorts out.</span></a><a href="/alternatives"><strong>Open source alternatives to the main AI clipping tools</strong><span>All four tools compared, with entry pricing.</span></a></div>
+</div></main>
+
+<footer class="site"><div class="wrap">
+  <div class="row">
+    <a href="https://www.openshorts.app/">OpenShorts</a>
+    <a href="https://github.com/mutonby/openshorts" rel="noopener">Source on GitHub</a>
+    <a href="/free-ai-clip-generator">Free AI clip generator</a>
+    <a href="/free-ai-clip-generator-no-watermark">No-watermark clip generator</a>
+    <a href="/open-source-video-clipper">Open source video clipper</a>
+    <a href="/open-source-ai-video-generator">Open source AI video generator</a>
+    <a href="/podcast-to-shorts">Podcast to shorts</a>
+    <a href="/youtube-to-shorts-converter">YouTube to Shorts converter</a>
+    <a href="/how-openshorts-works">How it works</a>
+    <a href="/alternatives">Alternatives compared</a>
+    <a href="/mcp">MCP server and API</a>
+    <a href="/automate-shorts-api">Automate shorts</a>
+  </div>
+  <p>OpenShorts self-hosted is free and open source under MIT. OpenShorts Cloud
+  is the hosted service: 20 free minutes a month, paid plans from $12/month.
+  Last updated 2026-08-04.</p>
+</div></footer>
+</body>
+</html>
