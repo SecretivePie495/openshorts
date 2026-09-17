@@ -14,6 +14,23 @@ export default defineConfig({
   // into #root and emits the static /alternatives pages, sitemap.xml and
   // llms.txt. See vite-plugin-seo.js.
   plugins: [react(), seo()],
+  // esbuild hoists const/let bindings across chunk boundaries during minification,
+  // which violates TDZ and produces "Cannot access 'ae' before initialization" in
+  // production builds. Disabling syntax minification keeps names intact and avoids
+  // the hoist while still tree-shaking and dead-code-eliminating.
+  esbuild: { minifySyntax: false },
+  build: {
+    rollupOptions: {
+      onwarn(warning, warn) {
+        // Only fail on cycles in our own source; third-party libs like mediabunny
+        // have known internal cycles that esbuild handles fine but Rollup warns about.
+        if (warning.code === 'CIRCULAR_DEPENDENCY' && !warning.message.includes('node_modules')) {
+          throw new Error('CIRCULAR: ' + warning.message)
+        }
+        warn(warning)
+      }
+    }
+  },
   server: {
     allowedHosts: [
       'openshorts.app',
