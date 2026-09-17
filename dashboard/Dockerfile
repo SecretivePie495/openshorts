@@ -27,6 +27,9 @@ ARG VITE_OPENPANEL_API_URL=""
 ENV VITE_OPENPANEL_API_URL=$VITE_OPENPANEL_API_URL
 ARG VITE_OPENPANEL_CLIENT_ID=""
 ENV VITE_OPENPANEL_CLIENT_ID=$VITE_OPENPANEL_CLIENT_ID
+# BUST_CACHE is a no-op build arg pushed manually to invalidate Railway's layer
+# cache when stale node_modules from an older React/scheduler version are cached.
+ARG BUST_CACHE=""
 RUN npm run build
 
 # ---- static serving (nginx) ----
