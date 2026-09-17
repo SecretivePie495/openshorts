@@ -887,6 +887,10 @@ def download_youtube_video(url, output_dir="."):
         for label, capped, proxy in plan_download_attempts(
             _direct_first, _statics, _proxy, bool(hd_args), youtube=is_youtube_url(url))
     ]
+    print(f"📥 Download plan: bgutil_script={_bgutil_script!r}, "
+          f"bgutil_http={_bgutil_http!r}, hd_args={'YES' if hd_args else 'NONE'}, "
+          f"cookies={'YES' if cookies_path else 'NO'}, "
+          f"attempts={[a[0] for a in attempts]}")
     if cookies_path and attempts:
         _ck_proxy = _statics[0] if _statics else (None if hd_args else _proxy)
         _ck_args = hd_args if hd_args else fallback_args
