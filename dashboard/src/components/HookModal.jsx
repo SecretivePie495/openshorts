@@ -96,6 +96,10 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
 
     if (!isOpen) return null;
 
+    // Let the hook span the whole clip instead of capping at an arbitrary 15s.
+    const maxDisplayDuration = Math.max(2, Math.floor(durationInSeconds) || 15);
+    const clampedDisplayDuration = Math.min(displayDuration, maxDisplayDuration);
+
     const handlePos = freePos || PRESET_FRACTIONS[position] || PRESET_FRACTIONS.top;
 
     const fractionFromPointer = (clientX, clientY) => {
@@ -126,7 +130,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
         size,
         style,
         entranceAnimation,
-        displayDurationSec: displayDuration,
+        displayDurationSec: clampedDisplayDuration,
         ...(freePos ? { xPct: freePos.x, yPct: freePos.y } : {}),
     };
 
@@ -307,19 +311,19 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                         <div>
                             <div className="flex items-center justify-between mb-2">
                                 <p className="eyebrow">Duration</p>
-                                <span className="readout">{displayDuration}S</span>
+                                <span className="readout">{clampedDisplayDuration}S</span>
                             </div>
                             <input
                                 type="range"
                                 min="2"
-                                max="15"
-                                value={displayDuration}
+                                max={maxDisplayDuration}
+                                value={clampedDisplayDuration}
                                 onChange={(e) => setDisplayDuration(parseInt(e.target.value))}
                                 className="w-full accent-[var(--color-accent)]"
                             />
                             <div className="flex justify-between">
                                 <span className="readout">2S</span>
-                                <span className="readout">15S</span>
+                                <span className="readout">{maxDisplayDuration}S</span>
                             </div>
                         </div>
 

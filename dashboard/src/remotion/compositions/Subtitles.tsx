@@ -6,20 +6,28 @@ import {
   useVideoConfig,
   spring,
   interpolate,
+  Easing,
 } from "remotion";
 import type { SubtitleConfig } from "../lib/types";
 import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
-import { getFontStack } from "../lib/fonts";
+import { getFontStack, subtitlePackFontFace } from "../lib/fonts";
 
 interface SubtitlesProps {
   config: SubtitleConfig;
 }
 
-const POSITION_MAP: Record<string, React.CSSProperties> = {
-  top: { top: "12%", bottom: "auto" },
-  middle: { top: "45%", bottom: "auto" },
-  bottom: { bottom: "10%", top: "auto" },
-};
+// Matches subtitles.py's SAFE_MARGIN_V (43, in ASS PlayResY=288 units) so the
+// preview's default position lines up with the server burn.
+const DEFAULT_MARGIN_V = 43;
+
+// "middle" ignores marginV server-side too — libass centers alignment 5
+// regardless of MarginV, so there's nothing to keep in sync here.
+function positionStyleFor(position: string, marginV: number): React.CSSProperties {
+  const pct = `${(marginV / 288) * 100}%`;
+  if (position === "top") return { top: pct, bottom: "auto" };
+  if (position === "middle") return { top: "45%", bottom: "auto" };
+  return { bottom: pct, top: "auto" };
+}
 
 export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {
   const { fps } = useVideoConfig();
@@ -27,6 +35,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {
 
   return (
     <AbsoluteFill>
+      <style>{subtitlePackFontFace}</style>
       {blocks.map((block, i) => {
         const startFrame = Math.round((block.startMs / 1000) * fps);
         const durationFrames = Math.max(
@@ -65,15 +74,31 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
   blockStartMs,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width: videoWidth } = useVideoConfig();
   const { style, position } = config;
 
   // Current time relative to composition start (sequence-relative frame)
   const currentTimeMs = blockStartMs + (frame / fps) * 1000;
   const activeIndex = getActiveWordIndex(block.words, currentTimeMs);
 
-  const positionStyle = POSITION_MAP[position] ?? POSITION_MAP.bottom;
+  // Free-drag center point wins over the top/middle/bottom preset — same
+  // override rule as HookOverlay's xPct/yPct.
+  const free = config.xPct != null && config.yPct != null;
+  const positionStyle: React.CSSProperties = free
+    ? { left: `${config.xPct! * 100}%`, top: `${config.yPct! * 100}%`, right: "auto", bottom: "auto" }
+    : positionStyleFor(position, style.marginV ?? DEFAULT_MARGIN_V);
   const fontStack = getFontStack(style.fontFamily);
+
+  // Block-level pop-in, ~495ms 1%->100% scale (matches the Musa Premiere
+  // preset's keyframe timing), Remotion-preview only like Hook's entrance.
+  const scaleIn =
+    style.animation === "scale-in"
+      ? interpolate(frame, [0, Math.round(fps * 0.495)], [0.01, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+          easing: Easing.out(Easing.cubic),
+        })
+      : 1;
 
   // Background box style
   const hasBg = style.bgOpacity > 0;
@@ -91,10 +116,10 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
     <div
       style={{
         position: "absolute",
-        left: 0,
-        right: 0,
+        ...(free ? {} : { left: 0, right: 0 }),
         display: "flex",
         justifyContent: "center",
+        ...(free ? { transform: "translate(-50%, -50%)" } : {}),
         ...positionStyle,
       }}
     >
@@ -104,7 +129,9 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
           flexWrap: "wrap",
           justifyContent: "center",
           gap: "6px 8px",
-          maxWidth: "85%",
+          maxWidth: free ? videoWidth * 0.85 : "85%",
+          width: free ? "max-content" : undefined,
+          transform: scaleIn !== 1 ? `scale(${scaleIn})` : undefined,
           ...bgStyle,
         }}
       >

@@ -209,6 +209,24 @@ class TestGenerateAss:
         content = out.read_text(encoding="utf-8-sig")
         assert "&H00FFFFFF" in content  # pure white, no dimming
 
+    def test_margin_v_moves_the_style_line(self, tmp_path):
+        from subtitles import generate_ass
+        out = tmp_path / "subs.ass"
+        words = [_w(" hi", 0.0, 0.5)]
+        assert generate_ass(self._transcript(words), 0, 10, str(out), margin_v=120) is True
+        content = out.read_text(encoding="utf-8-sig")
+        style_line = next(l for l in content.splitlines() if l.startswith("Style: Default,"))
+        assert ",120," in style_line
+
+    def test_margin_v_clamped_to_valid_range(self, tmp_path):
+        from subtitles import generate_ass
+        out = tmp_path / "subs.ass"
+        words = [_w(" hi", 0.0, 0.5)]
+        assert generate_ass(self._transcript(words), 0, 10, str(out), margin_v=9999) is True
+        content = out.read_text(encoding="utf-8-sig")
+        style_line = next(l for l in content.splitlines() if l.startswith("Style: Default,"))
+        assert ",200," in style_line  # clamped to the 0-200 max, not 9999
+
 
 class TestBurnFilterFonts:
     """The ffmpeg filter must point libass at the bundled fonts dir — without
@@ -242,6 +260,25 @@ class TestBurnFilterFonts:
         assert "fontsdir=" in cmd
         # ASS carries its own styles; force_style must NOT override them
         assert "force_style" not in cmd
+
+    def test_margin_v_reaches_the_srt_force_style(self, monkeypatch, tmp_path):
+        import subtitles as m
+        captured = {}
+
+        class _Ok:
+            returncode = 0
+            stderr = b""
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return _Ok()
+
+        monkeypatch.setattr(m.subprocess, "run", fake_run)
+        srt = tmp_path / "subs.srt"
+        srt.write_text("stub", encoding="utf-8")
+        m.burn_subtitles("in.mp4", str(srt), "out.mp4", margin_v=99)
+        cmd = " ".join(str(c) for c in captured["cmd"])
+        assert "MarginV=99" in cmd
 
 
 class TestAutoCaptionDefaults:

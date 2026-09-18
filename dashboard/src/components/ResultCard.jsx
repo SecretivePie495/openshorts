@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Share2, Instagram, Youtube, Video, AlertCircle, Loader2, Copy, Check, Wand2, Type, Calendar, Languages, FileText, Link2, Scissors, Crosshair, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { Download, Share2, Instagram, Youtube, Video, AlertCircle, Loader2, Copy, Check, Wand2, Type, Calendar, Languages, FileText, Link2, Scissors, Crosshair, TrendingUp, CheckCircle2, Sparkles } from 'lucide-react';
 import { getApiUrl } from '../config';
 import { apiFetch } from '../lib/api';
 import SubtitleModal from './SubtitleModal';
 import HookModal from './HookModal';
+import OverlayModal from './OverlayModal';
 import TranslateModal from './TranslateModal';
 import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
@@ -140,6 +141,11 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [serverVideoFile, setServerVideoFile] = useState(initialState?.server_file || (clip.video_url || '').split('/').pop());
     const [videoErrored, setVideoErrored] = useState(false);
     const [resolution, setResolution] = useState(null);
+    // Preview box aspect ratio follows the actual rendered clip (9:16 default
+    // before metadata loads) instead of a hardcoded 9:16 — a horizontal or
+    // square clip inside a forced-tall box gets fake black bars from
+    // object-contain on top of whatever the format itself renders.
+    const [videoAspect, setVideoAspect] = useState(9 / 16);
 
     // Adopt the durable copy only while it matches the current server file, and
     // pin the first signed URL seen for that file: /api/history mints a fresh
@@ -207,8 +213,10 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [isEditing, setIsEditing] = useState(false);
     const [isSubtitling, setIsSubtitling] = useState(false);
     const [isHooking, setIsHooking] = useState(false);
+    const [isOverlaying, setIsOverlaying] = useState(false);
     const [isTranslating, setIsTranslating] = useState(false);
     const [showHookModal, setShowHookModal] = useState(false);
+    const [showOverlayModal, setShowOverlayModal] = useState(false);
     const [showTranslateModal, setShowTranslateModal] = useState(false);
     const [editError, setEditError] = useState(null);
 
@@ -240,6 +248,10 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     // one). /api/hook REPLACES it; tracked locally so the modal stays honest
     // after edits without refetching the job.
     const [burnedHook, setBurnedHook] = useState(clip.auto_hook?.text || null);
+
+    // The overlay currently burned into the server file, if any (same
+    // tracking rationale as burnedHook).
+    const [burnedOverlay, setBurnedOverlay] = useState(clip.overlay || null);
 
     // Fetch clip duration from transcript endpoint
     useEffect(() => {
@@ -451,6 +463,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     clip_index: index,
                     position: options.position,
                     font_size: options.fontSize,
+                    margin_v: options.marginV,
                     font_name: options.fontName,
                     font_color: options.fontColor,
                     border_color: options.borderColor,
@@ -591,6 +604,69 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setTimeout(() => setEditError(null), 5000);
         } finally {
             setIsHooking(false);
+        }
+    };
+
+    const handleOverlay = async (overlayId) => {
+        setIsOverlaying(true);
+        setEditError(null);
+        try {
+            const res = await apiFetch('/api/overlay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    clip_index: index,
+                    overlay_id: overlayId,
+                    input_filename: serverVideoFile,
+                }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            if (data.new_video_url) {
+                setCurrentVideoUrl(getApiUrl(data.new_video_url));
+                setServerVideoFile(data.new_video_url.split('/').pop());
+                setBurnedOverlay(data.overlay ?? null);
+                if (videoRef.current) videoRef.current.load();
+                setShowOverlayModal(false);
+            }
+        } catch (e) {
+            setEditError(e.message);
+            setTimeout(() => setEditError(null), 5000);
+        } finally {
+            setIsOverlaying(false);
+        }
+    };
+
+    // Strip the burned overlay off the server file.
+    const handleRemoveOverlay = async () => {
+        setIsOverlaying(true);
+        setEditError(null);
+        try {
+            const res = await apiFetch('/api/overlay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    clip_index: index,
+                    remove: true,
+                    input_filename: serverVideoFile,
+                }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            if (data.new_video_url) {
+                setCurrentVideoUrl(getApiUrl(data.new_video_url));
+                setServerVideoFile(data.new_video_url.split('/').pop());
+                setBurnedOverlay(null);
+                if (videoRef.current) videoRef.current.load();
+                setShowOverlayModal(false);
+            }
+        } catch (e) {
+            setEditError(e.message);
+            setTimeout(() => setEditError(null), 5000);
+        } finally {
+            setIsOverlaying(false);
         }
     };
 
@@ -748,7 +824,8 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 which pushed the title, captions and every action off-screen.
                 Capping the height and centring keeps the whole card scannable
                 without letterboxing the clip. */}
-            <div className="w-full max-w-[calc(64vh*0.5625)] md:max-w-none mx-auto md:mx-0 md:w-[236px] bg-black relative shrink-0 aspect-[9/16] md:aspect-auto group/video">
+            <div className="w-full max-w-[calc(64vh*0.5625)] md:max-w-none mx-auto md:mx-0 md:w-[236px] bg-black relative shrink-0 group/video"
+                style={{ aspectRatio: videoAspect }}>
                 <video
                     ref={videoRef}
                     src={playbackUrl}
@@ -757,6 +834,9 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     playsInline
                     onLoadedMetadata={(e) => {
                         if (e.target.videoWidth) setResolution(`${e.target.videoWidth}×${e.target.videoHeight}`);
+                        if (e.target.videoWidth && e.target.videoHeight) {
+                            setVideoAspect(e.target.videoWidth / e.target.videoHeight);
+                        }
                     }}
                     onError={() => {
                         // The durable copy is unreachable (signature expired after an
@@ -953,6 +1033,15 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     >
                         {isHooking ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Wand2 size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
                         {isHooking ? 'adding…' : 'viral hook'}
+                    </button>
+
+                    <button
+                        onClick={() => setShowOverlayModal(true)}
+                        disabled={isOverlaying}
+                        className={QUIET_BTN}
+                    >
+                        {isOverlaying ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Sparkles size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
+                        {isOverlaying ? 'adding…' : 'overlay'}
                     </button>
 
                     <button
@@ -1224,6 +1313,16 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 serverRender={hasServerBurns}
                 burnedHook={burnedHook}
                 onRemove={burnedHook ? handleRemoveHook : null}
+            />
+
+            <OverlayModal
+                isOpen={showOverlayModal}
+                onClose={() => setShowOverlayModal(false)}
+                onApply={handleOverlay}
+                onRemove={burnedOverlay ? handleRemoveOverlay : null}
+                isProcessing={isOverlaying}
+                videoUrl={currentVideoUrl}
+                burnedOverlay={burnedOverlay}
             />
 
             <TranslateModal

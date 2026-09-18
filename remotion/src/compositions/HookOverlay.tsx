@@ -73,7 +73,7 @@ interface HookBoxProps {
 
 const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width: videoWidth } = useVideoConfig();
   const scale = SIZE_SCALE[config.size] ?? 1.0;
 
   // Entrance animation
@@ -154,7 +154,11 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
         style={{
           opacity: animOpacity,
           transform: `scale(${animScale}) translateY(${animTranslateY}px)`,
-          maxWidth: "90%",
+          // Percentage maxWidth resolves against the wrapper's shrink-to-fit
+          // (indefinite) width in free-drag mode and collapses toward 0 in
+          // some engines, forcing every word onto its own line — a tall
+          // narrow "square" instead of a wide box. Use a definite px value.
+          maxWidth: videoWidth * 0.9,
           backgroundColor: look.box ?? "transparent",
           borderRadius: 20,
           padding: look.box ? `${25 * scale}px ${30 * scale}px` : `${8 * scale}px ${12 * scale}px`,

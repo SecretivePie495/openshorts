@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import RemotionPreview from './RemotionPreview';
@@ -12,6 +12,132 @@ const FONT_OPTIONS = [
     { value: 'Helvetica', label: 'Helvetica' },
     { value: 'Georgia', label: 'Georgia' },
     { value: 'Courier New', label: 'Courier New' },
+    // Caption display fonts pulled from a dafontfree.net pack (see
+    // fonts/subtitle-packs/README.md) — most are marked personal-use/demo
+    // by their authors, not cleared for a paid product's output.
+    { value: 'Akira Expanded', label: 'Akira Expanded' },
+    { value: 'Burbank Big Condensed', label: 'Burbank Big Condensed' },
+    { value: 'Dimbo Italic', label: 'Dimbo Italic' },
+    { value: 'Dimbo Regular', label: 'Dimbo Regular' },
+    { value: 'Gilliany', label: 'Gilliany' },
+    { value: 'QUARTZO', label: 'QUARTZO' },
+    { value: 'QUARTZO demo PERSONAL USE ONLY', label: 'QUARTZO demo PERSONAL USE ONLY' },
+    { value: 'QUARTZO demo PERSONAL USE ONLY 2', label: 'QUARTZO demo PERSONAL USE ONLY 2' },
+    { value: 'Questrian', label: 'Questrian' },
+    { value: 'Rainbow', label: 'Rainbow' },
+    { value: 'Red Rocket Academy', label: 'Red Rocket Academy' },
+    { value: 'Regensburg Grunged RegensburgGrunged', label: 'Regensburg Grunged RegensburgGrunged' },
+    { value: 'Regensburg Grunged RegensburgGrunged Italic', label: 'Regensburg Grunged RegensburgGrunged Italic' },
+    { value: 'Regensburg Italic', label: 'Regensburg Italic' },
+    { value: 'Regensburg Regensburg', label: 'Regensburg Regensburg' },
+    { value: 'Restaurant Menu', label: 'Restaurant Menu' },
+    { value: 'Restaurant Menu Book', label: 'Restaurant Menu Book' },
+    { value: 'Restaurant Menu Book College', label: 'Restaurant Menu Book College' },
+    { value: 'Restaurant Menu Hollow', label: 'Restaurant Menu Hollow' },
+    { value: 'Retroica', label: 'Retroica' },
+    { value: 'REVOLUTION', label: 'REVOLUTION' },
+    { value: 'Riffic Free', label: 'Riffic Free' },
+    { value: 'RissaTypeface', label: 'RissaTypeface' },
+    { value: 'Road Rage', label: 'Road Rage' },
+    { value: 'ROBO', label: 'ROBO' },
+    { value: 'Roboto Condensed RobotoCondensed Bold', label: 'Roboto Condensed RobotoCondensed Bold' },
+    { value: 'Roboto Condensed RobotoCondensed BoldItalic', label: 'Roboto Condensed RobotoCondensed BoldItalic' },
+    { value: 'Roboto Condensed RobotoCondensed Italic', label: 'Roboto Condensed RobotoCondensed Italic' },
+    { value: 'Russo One', label: 'Russo One' },
+    { value: 'Saltino Saltino', label: 'Saltino Saltino' },
+    { value: 'Saltino Saltino 2', label: 'Saltino Saltino 2' },
+    { value: 'SanelmaW00-Regular', label: 'SanelmaW00-Regular' },
+    { value: 'Screengem', label: 'Screengem' },
+    { value: 'SeriesOrbit', label: 'SeriesOrbit' },
+    { value: 'SF Collegiate Solid', label: 'SF Collegiate Solid' },
+    { value: 'SF Viper Squadron', label: 'SF Viper Squadron' },
+    { value: 'Sheeping Dogs', label: 'Sheeping Dogs' },
+    { value: 'Shlop', label: 'Shlop' },
+    { value: 'Short Xurkit', label: 'Short Xurkit' },
+    { value: 'Short Xurkit Tilt', label: 'Short Xurkit Tilt' },
+    { value: 'Shutter Braille Free Version', label: 'Shutter Braille Free Version' },
+    { value: 'Signatra DEMO Signatra', label: 'Signatra DEMO Signatra' },
+    { value: 'Signatra DEMO Signatra 2', label: 'Signatra DEMO Signatra 2' },
+    { value: 'SIMPLCITY PERSONAL USE', label: 'SIMPLCITY PERSONAL USE' },
+    { value: 'SIMPLICITY SHADOW PERSONAL USE', label: 'SIMPLICITY SHADOW PERSONAL USE' },
+    { value: 'SkaterDudes', label: 'SkaterDudes' },
+    { value: 'Sketch 3D', label: 'Sketch 3D' },
+    { value: 'Slant', label: 'Slant' },
+    { value: 'Slimlines', label: 'Slimlines' },
+    { value: 'Snickles', label: 'Snickles' },
+    { value: 'Sontoloyo', label: 'Sontoloyo' },
+    { value: 'Soup of Justice', label: 'Soup of Justice' },
+    { value: 'Soviet Program SovietProgram', label: 'Soviet Program SovietProgram' },
+    { value: 'Soviet Program SovietProgram Bold', label: 'Soviet Program SovietProgram Bold' },
+    { value: 'Soviet Program SovietProgram BoldItalic', label: 'Soviet Program SovietProgram BoldItalic' },
+    { value: 'Soviet Program SovietProgram Italic', label: 'Soviet Program SovietProgram Italic' },
+    { value: 'Space Age', label: 'Space Age' },
+    { value: 'SPIDER MONKEY', label: 'SPIDER MONKEY' },
+    { value: 'Stalinist One', label: 'Stalinist One' },
+    { value: 'Star Jedi', label: 'Star Jedi' },
+    { value: 'Starlight Personal', label: 'Starlight Personal' },
+    { value: 'Strenuous', label: 'Strenuous' },
+    { value: 'Sugarpunch DEMO', label: 'Sugarpunch DEMO' },
+    { value: 'SummerLove', label: 'SummerLove' },
+    { value: 'Super glue', label: 'Super glue' },
+    { value: 'Super Mario 256', label: 'Super Mario 256' },
+    { value: 'Super Mario World', label: 'Super Mario World' },
+    { value: 'Supersonic Rocketship', label: 'Supersonic Rocketship' },
+    { value: 'Surfing Capital', label: 'Surfing Capital' },
+    { value: 'Technique BRK', label: 'Technique BRK' },
+    { value: 'Technique OL BRK', label: 'Technique OL BRK' },
+    { value: 'Territorial', label: 'Territorial' },
+    { value: 'The Bold Font', label: 'The Bold Font' },
+    { value: 'The Breakdown', label: 'The Breakdown' },
+    { value: 'The Godfather', label: 'The Godfather' },
+    { value: 'The Juke Box', label: 'The Juke Box' },
+    { value: 'Thinking Of Betty', label: 'Thinking Of Betty' },
+    { value: 'Thunder Lord', label: 'Thunder Lord' },
+    { value: 'Thunder Titan', label: 'Thunder Titan' },
+    { value: 'Thunderstrike', label: 'Thunderstrike' },
+    { value: 'Timeline', label: 'Timeline' },
+    { value: 'Times New Yorker', label: 'Times New Yorker' },
+    { value: 'Tough Love', label: 'Tough Love' },
+    { value: 'Toxico', label: 'Toxico' },
+    { value: 'Transformers', label: 'Transformers' },
+    { value: 'Troublemarker DEMO', label: 'Troublemarker DEMO' },
+    { value: 'True Lies', label: 'True Lies' },
+    { value: 'TYPOGRAPH PRO', label: 'TYPOGRAPH PRO' },
+    { value: 'TypoGraphica', label: 'TypoGraphica' },
+    { value: 'Umbrage', label: 'Umbrage' },
+    { value: 'Uni Sans Heavy', label: 'Uni Sans Heavy' },
+    { value: 'Uni Sans Heavy Italic', label: 'Uni Sans Heavy Italic' },
+    { value: 'Uni Sans heavy italic caps', label: 'Uni Sans heavy italic caps' },
+    { value: 'UnitaW01-ExtraBold', label: 'UnitaW01-ExtraBold' },
+    { value: 'University', label: 'University' },
+    { value: 'Unrealised', label: 'Unrealised' },
+    { value: 'Varsity Regular', label: 'Varsity Regular' },
+    { value: 'Vermin Vibes', label: 'Vermin Vibes' },
+    { value: 'Vermin Vibes V', label: 'Vermin Vibes V' },
+    { value: 'Viafont', label: 'Viafont' },
+    { value: 'Videopac', label: 'Videopac' },
+    { value: 'Walrus', label: 'Walrus' },
+    { value: 'Whiskey Bravo Victor', label: 'Whiskey Bravo Victor' },
+    { value: 'Whiskey Bravo Victor Bold', label: 'Whiskey Bravo Victor Bold' },
+    { value: 'Whiskey Bravo Victor Condensed', label: 'Whiskey Bravo Victor Condensed' },
+    { value: 'Whiskey Bravo Victor Expanded', label: 'Whiskey Bravo Victor Expanded' },
+    { value: 'Whiskey Bravo Victor Halftone', label: 'Whiskey Bravo Victor Halftone' },
+    { value: 'Whiskey Bravo Victor Italic', label: 'Whiskey Bravo Victor Italic' },
+    { value: 'Whiskey Bravo Victor Laser', label: 'Whiskey Bravo Victor Laser' },
+    { value: 'Whiskey Bravo Victor Laser Pro', label: 'Whiskey Bravo Victor Laser Pro' },
+    { value: 'Whiskey Bravo Victor Leftalic', label: 'Whiskey Bravo Victor Leftalic' },
+    { value: 'Whiskey Bravo Victor Outline', label: 'Whiskey Bravo Victor Outline' },
+    { value: 'WhoopAss', label: 'WhoopAss' },
+    { value: 'Wide awake Black', label: 'Wide awake Black' },
+    { value: 'woodcutter carnage', label: 'woodcutter carnage' },
+    { value: 'Xenos', label: 'Xenos' },
+    { value: 'Xheighter Black BlackOblique', label: 'Xheighter Black BlackOblique' },
+    { value: 'Xheighter Black Xheighter Black', label: 'Xheighter Black Xheighter Black' },
+    { value: 'Xheighter Light LightOblique', label: 'Xheighter Light LightOblique' },
+    { value: 'Xheighter Light Xheighter Light', label: 'Xheighter Light Xheighter Light' },
+    { value: 'Zephyrean BRK', label: 'Zephyrean BRK' },
+    { value: 'Zilap Black Storm', label: 'Zilap Black Storm' },
+    { value: 'Zilap Monograma', label: 'Zilap Monograma' },
 ];
 
 const COLOR_PRESETS = [
@@ -35,6 +161,7 @@ const ANIMATION_OPTIONS = [
     { value: 'pop', label: 'Pop' },
     { value: 'word-highlight', label: 'Glow' },
     { value: 'karaoke', label: 'Karaoke' },
+    { value: 'scale-in', label: 'Scale In' },
     { value: 'none', label: 'None' },
 ];
 
@@ -43,6 +170,9 @@ const POSITION_OPTIONS = [
     { value: 'middle', label: 'middle' },
     { value: 'bottom', label: 'bottom' },
 ];
+
+// Fallback anchor for the free-drag handle before the user has dragged at all.
+const PRESET_FRACTIONS = { top: { x: 0.5, y: 0.15 }, middle: { x: 0.5, y: 0.45 }, bottom: { x: 0.5, y: 0.85 } };
 
 // Ready-made caption looks burned server-side as karaoke ASS (word highlight):
 // dimmed base text + strong active word, optional glow/pop/box effect.
@@ -67,7 +197,10 @@ const swatchClass = (selected) =>
 
 export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll, onRemove, isProcessing, videoUrl, jobId, clipIndex, existingHook, bulkCount = 0, bulkProgress }) {
     const [position, setPosition] = useState('bottom');
-    const [fontSize] = useState(24);
+    const [fontSize, setFontSize] = useState(24);
+    // Matches subtitles.py's SAFE_MARGIN_V — distance from the top/bottom
+    // edge in ASS PlayResY=288 units; "middle" ignores this server-side too.
+    const [marginV, setMarginV] = useState(43);
     const [fontName, setFontName] = useState('Verdana');
     const [fontColor, setFontColor] = useState('#FFFFFF');
     const [highlightColor, setHighlightColor] = useState('#FFDD00');
@@ -84,6 +217,53 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [baseOpacity, setBaseOpacity] = useState(1.0);
     const [uppercase, setUppercase] = useState(false);
     const [activePreset, setActivePreset] = useState(null);
+
+    // Drag-to-move (anywhere, both axes) and drag-to-resize (fontSize) on the
+    // preview — same free-drag pattern as HookModal's xPct/yPct. Picking a
+    // top/middle/bottom preset clears the free position; dragging the handle
+    // sets it and overrides the preset (see subtitleConfig below).
+    // Preview/in-browser-render only: the ASS burn always centers the line
+    // horizontally (MarginL/MarginR fixed server-side in subtitles.py), so a
+    // clip that falls back to that server path renders centered with only
+    // the vertical component honored (derived from freePos.y at generate
+    // time — see the apply button handler).
+    const previewRef = useRef(null);
+    const dragRef = useRef(null); // { kind: 'move' | 'resize', startY, startFontSize }
+    const [freePos, setFreePos] = useState(null); // { x, y } in 0-1, overrides the position preset when set
+
+    const handlePos = freePos || PRESET_FRACTIONS[position] || PRESET_FRACTIONS.bottom;
+
+    const fractionFromPointer = (clientX, clientY) => {
+        const rect = previewRef.current.getBoundingClientRect();
+        return {
+            x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+            y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
+        };
+    };
+
+    const startMoveDrag = (e) => {
+        e.preventDefault();
+        dragRef.current = { kind: 'move' };
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const startResizeDrag = (e) => {
+        e.preventDefault();
+        dragRef.current = { kind: 'resize', startY: e.clientY, startFontSize: fontSize };
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const onHandleDragMove = (e) => {
+        const d = dragRef.current;
+        if (!d || !previewRef.current) return;
+        if (d.kind === 'move') {
+            setFreePos(fractionFromPointer(e.clientX, e.clientY));
+        } else if (d.kind === 'resize') {
+            const deltaPx = e.clientY - d.startY;
+            setFontSize(Math.round(Math.min(48, Math.max(12, d.startFontSize + deltaPx / 6))));
+        }
+    };
+    const onHandleDragEnd = () => {
+        dragRef.current = null;
+    };
 
     const applyPreset = (p) => {
         setActivePreset(p.id);
@@ -171,7 +351,9 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
             // Karaoke look reflected live in the playable preview.
             baseOpacity: style === 'karaoke' ? baseOpacity : 1,
             uppercase: style === 'karaoke' ? uppercase : false,
+            marginV,
         },
+        ...(freePos ? { xPct: freePos.x, yPct: freePos.y } : {}),
     };
 
     // Fallback: static CSS preview (same as original)
@@ -207,7 +389,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         <Modal isOpen={isOpen} onClose={onClose} size="xl" eyebrow="EDITOR · SUBTITLES" title="subtitles">
             <div className="flex flex-col md:flex-row gap-6">
                 {/* Left: Preview */}
-                <div className="flex-1 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16] max-h-[600px]">
+                <div ref={previewRef} className="flex-1 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16] max-h-[600px]">
                     {captionsLoading ? (
                         <div className="flex items-center gap-2 text-muted">
                             <Loader2 size={16} className="animate-spin" />
@@ -233,6 +415,64 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 </span>
                             </div>
                         </>
+                    )}
+                    {/* Drag-to-move / drag-to-resize handles, mirroring the hook overlay */}
+                    {!captionsLoading && (
+                        <div
+                            onPointerDown={startMoveDrag}
+                            onPointerMove={onHandleDragMove}
+                            onPointerUp={onHandleDragEnd}
+                            style={{
+                                position: 'absolute',
+                                left: `${handlePos.x * 100}%`,
+                                top: `${handlePos.y * 100}%`,
+                                transform: freePos ? 'translate(-50%, -50%)'
+                                    : position === 'bottom' ? 'translate(-50%, 6px)' : 'translate(-50%, -18px)',
+                                cursor: 'grab',
+                                zIndex: 20,
+                                padding: '4px 8px',
+                                borderRadius: 999,
+                                background: 'rgba(0,0,0,0.55)',
+                                border: '1px dashed rgba(255,255,255,0.7)',
+                                color: '#fff',
+                                fontSize: 10,
+                                letterSpacing: '0.05em',
+                                textTransform: 'uppercase',
+                                touchAction: 'none',
+                                userSelect: 'none',
+                            }}
+                        >
+                            ⠿ drag to move
+                        </div>
+                    )}
+                    {!captionsLoading && (
+                        <div
+                            onPointerDown={startResizeDrag}
+                            onPointerMove={onHandleDragMove}
+                            onPointerUp={onHandleDragEnd}
+                            style={{
+                                position: 'absolute',
+                                left: `${handlePos.x * 100}%`,
+                                top: `${handlePos.y * 100}%`,
+                                transform: freePos ? 'translate(24px, -50%)'
+                                    : position === 'bottom' ? 'translate(56px, 6px)' : 'translate(56px, -18px)',
+                                cursor: 'ns-resize',
+                                zIndex: 20,
+                                padding: '4px 8px',
+                                borderRadius: 999,
+                                background: 'rgba(0,0,0,0.55)',
+                                border: '1px dashed rgba(255,255,255,0.7)',
+                                color: '#fff',
+                                fontSize: 10,
+                                letterSpacing: '0.05em',
+                                textTransform: 'uppercase',
+                                touchAction: 'none',
+                                userSelect: 'none',
+                            }}
+                            title="Drag up/down to resize"
+                        >
+                            ⤢ size
+                        </div>
                     )}
                 </div>
 
@@ -291,9 +531,57 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <SegmentedControl
                                 options={POSITION_OPTIONS}
                                 value={position}
-                                onChange={setPosition}
+                                onChange={(v) => { setPosition(v); setFreePos(null); }}
                                 size="sm"
                             />
+                            <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+                                {freePos
+                                    ? <>Custom position — drag the handle on the preview to fine-tune, or{' '}
+                                        <button type="button" onClick={() => setFreePos(null)} className="underline underline-offset-2 hover:opacity-80">reset to preset</button>.
+                                        {' '}If this clip needs the server-side karaoke burn, only the vertical position carries over — that path always centers the line horizontally.
+                                      </>
+                                    : 'Or drag the handle on the preview to place it anywhere.'}
+                            </p>
+                            {!freePos && position !== 'middle' && (
+                                <div className="mt-3">
+                                    <div className="flex justify-between mb-1">
+                                        <span className="readout">Fine-tune position</span>
+                                        <span className="readout">{marginV}</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="160"
+                                        value={marginV}
+                                        onChange={(e) => setMarginV(parseInt(e.target.value))}
+                                        className="w-full accent-[var(--color-accent)]"
+                                    />
+                                    <div className="flex justify-between">
+                                        <span className="readout">Edge</span>
+                                        <span className="readout">Center</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Font Size */}
+                        <div>
+                            <div className="flex justify-between mb-1">
+                                <p className="eyebrow">Size</p>
+                                <span className="readout">{fontSize}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="12"
+                                max="48"
+                                value={fontSize}
+                                onChange={(e) => setFontSize(parseInt(e.target.value))}
+                                className="w-full accent-[var(--color-accent)]"
+                            />
+                            <div className="flex justify-between">
+                                <span className="readout">Small</span>
+                                <span className="readout">Large</span>
+                            </div>
                         </div>
 
                         {/* Animation Style (new) */}
@@ -449,8 +737,19 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             // differs from what the transcript produced.
                             const textEdited = originalCaptions.length > 0
                                 && editableText.trim() !== originalCaptions.map((c) => c.text).join(' ').trim();
+                            // The server ASS burn has no xPct/yPct — approximate a custom
+                            // drag with the nearest top/middle/bottom + marginV so it isn't
+                            // silently dropped for clips that fall back to that path.
+                            const fallbackPosition = !freePos ? position
+                                : freePos.y < 0.33 ? 'top'
+                                : freePos.y > 0.67 ? 'bottom'
+                                : 'middle';
+                            const fallbackMarginV = !freePos ? marginV
+                                : fallbackPosition === 'top' ? Math.round(freePos.y * 288)
+                                : fallbackPosition === 'bottom' ? Math.round((1 - freePos.y) * 288)
+                                : marginV;
                             const styleOptions = {
-                                position, fontSize, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
+                                position: fallbackPosition, fontSize, marginV: fallbackMarginV, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
                                 // Karaoke burn (server-side ASS render)
                                 style, effect, baseOpacity, uppercase, highlightColor,
                                 // Remotion data

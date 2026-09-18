@@ -363,6 +363,50 @@ def _crop_face_reference(frame_path, face_box, out_path):
 
 
 # ---------------------------------------------------------------------------
+# Campaign briefs
+# ---------------------------------------------------------------------------
+
+_CAMPAIGN_KEYS = ("tags", "format", "cta", "before_you_post", "donts", "missing")
+
+
+def generate_campaign_checklist(api_key, brief_text):
+    """One text call that turns a pasted UGC/clipping campaign brief (tag
+    requirements, CTA, follow-to-get-paid gates, etc.) into a short do-this
+    checklist, so a clipper doesn't have to re-read the whole brief per post."""
+    import gemini_worker
+
+    client = genai.Client(api_key=api_key)
+    prompt = f"""You are extracting a checklist from a UGC/clipping/affiliate campaign brief. Do not add advice, opinions, or anything not already in the brief — only restructure it. Keep every bullet under ~12 words.
+
+BRIEF:
+\"\"\"{brief_text[:12000]}\"\"\"
+
+Return JSON:
+{{
+  "tags": ["exact @handle or geo-tag requirement, one per item"],
+  "format": ["platform/aspect-ratio/length/hook/editing-style requirements, one per item"],
+  "cta": ["exact required CTA text and where it must appear, one per item"],
+  "before_you_post": ["one-time gates: follows, warm-up, anything not about a single clip"],
+  "donts": ["explicit prohibitions, one per item"],
+  "missing": ["things a clipper would need that the brief doesn't give, e.g. payout rate, deadline — empty array if nothing is missing"]
+}}
+Use an empty array for a section with nothing in the brief — never invent content to fill it."""
+    # Capacity chain: a jammed TEXT_MODEL should retry/jitter through a
+    # transient 503 instead of failing the checklist outright (18-sep-2026).
+    response, _ = gemini_worker.generate_with_capacity_chain(
+        client, TEXT_MODEL,
+        contents=[prompt],
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+        where="campaign-checklist")
+    try:
+        data = _parse_json(response.text)
+    except (json.JSONDecodeError, AttributeError):
+        print(f"⚠️ [CampaignBrief] JSON unreadable: {getattr(response, 'text', '')[:200]}")
+        data = {}
+    return {k: [str(x).strip() for x in (data.get(k) or []) if str(x).strip()] for k in _CAMPAIGN_KEYS}
+
+
+# ---------------------------------------------------------------------------
 # Thumbnails
 # ---------------------------------------------------------------------------
 

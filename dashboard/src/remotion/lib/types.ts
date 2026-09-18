@@ -8,7 +8,7 @@ export interface CaptionWord {
 }
 
 // --- Subtitle config ---
-export type SubtitleAnimation = "none" | "word-highlight" | "pop" | "karaoke";
+export type SubtitleAnimation = "none" | "word-highlight" | "pop" | "karaoke" | "scale-in";
 export type SubtitlePosition = "top" | "middle" | "bottom";
 
 export interface SubtitleStyle {
@@ -24,12 +24,22 @@ export interface SubtitleStyle {
   // Karaoke look: dim inactive words (0-1) and force uppercase.
   baseOpacity?: number;
   uppercase?: boolean;
+  // Distance from the top/bottom edge, in ASS PlayResY=288 units (matches
+  // subtitles.py's SAFE_MARGIN_V=43) — ignored when position is "middle".
+  marginV?: number;
 }
 
 export interface SubtitleConfig {
   captions: CaptionWord[];
   position: SubtitlePosition;
   style: SubtitleStyle;
+  // Free-drag center point (0-1 of frame width/height). Overrides `position`
+  // when set. Preview/in-browser render only — the server ASS burn has no
+  // horizontal placement (subtitles.py centers every line), so a clip that
+  // falls back to that path renders centered with only the vertical
+  // component approximated via style.marginV.
+  xPct?: number;
+  yPct?: number;
 }
 
 // --- Hook config ---
@@ -100,13 +110,18 @@ export const subtitleStyleSchema = z.object({
   borderWidth: z.number(),
   bgColor: z.string(),
   bgOpacity: z.number().min(0).max(1),
-  animation: z.enum(["none", "word-highlight", "pop", "karaoke"]),
+  animation: z.enum(["none", "word-highlight", "pop", "karaoke", "scale-in"]),
+  baseOpacity: z.number().min(0).max(1).optional(),
+  uppercase: z.boolean().optional(),
+  marginV: z.number().min(0).max(200).optional(),
 });
 
 export const subtitleConfigSchema = z.object({
   captions: z.array(captionWordSchema),
   position: z.enum(["top", "middle", "bottom"]),
   style: subtitleStyleSchema,
+  xPct: z.number().min(0).max(1).optional(),
+  yPct: z.number().min(0).max(1).optional(),
 });
 
 export const hookConfigSchema = z.object({

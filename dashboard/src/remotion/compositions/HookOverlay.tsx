@@ -66,7 +66,7 @@ interface HookBoxProps {
 
 const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width: videoWidth } = useVideoConfig();
   const scale = SIZE_SCALE[config.size] ?? 1.0;
 
   // Entrance animation
@@ -153,7 +153,14 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
         style={{
           opacity: animOpacity,
           transform: `scale(${animScale}) translateY(${animTranslateY}px)`,
-          maxWidth: "90%",
+          // In free-drag mode the wrapper has no left/right span, so it's a
+          // shrink-to-fit flex box; Chromium sizes that from min-content
+          // (one word per line) instead of the text's natural width unless
+          // width is pinned to max-content. maxWidth alone (even in px)
+          // still let it collapse toward 0 — a tall narrow "square" instead
+          // of a wide box.
+          width: "max-content",
+          maxWidth: videoWidth * 0.9,
           backgroundColor: look.box ?? "transparent",
           borderRadius: 20,
           padding: look.box ? `${25 * scale}px ${30 * scale}px` : 0,

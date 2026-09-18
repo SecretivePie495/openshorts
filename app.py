@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3, list_actor_gallery, upload_video_to_gallery, list_video_gallery
 import recut
 import layout_ranges
+import overlays
 
 load_dotenv()
 
@@ -568,6 +569,52 @@ def _strip_burned_hook(output_dir, filename):
         if not m or not os.path.exists(os.path.join(output_dir, m.group(1))):
             return filename
         filename = m.group(1)
+
+
+def _strip_burned_overlay(output_dir, filename):
+    """Walk ``overlaid_<ts>_`` prefixes back to the file without a burned
+    library overlay. Same fail-safe contract as _strip_burned_hook."""
+    while True:
+        m = re.match(r'^overlaid_\d+_(.+)$', filename)
+        if not m or not os.path.exists(os.path.join(output_dir, m.group(1))):
+            return filename
+        filename = m.group(1)
+
+
+def _reapply_hook(job_id, clip_index, video_path):
+    """Re-burn the clip's saved hook onto a freshly derived file.
+
+    Layering is base -> overlay -> hook -> captions (see _reapply_captions
+    for why captions are always last). Changing the overlay means re-deriving
+    from a clean base, so the hook has to go back on before captions do.
+
+    Returns the hooked path, or None if the clip has no saved hook / it fails.
+    """
+    try:
+        meta_files = glob.glob(os.path.join(OUTPUT_DIR, job_id, "*_metadata.json"))
+        if not meta_files:
+            return None
+        with open(meta_files[0], 'r') as f:
+            data = json.load(f)
+        clips = data.get('shorts', [])
+        if clip_index >= len(clips):
+            return None
+        hook = clips[clip_index].get('auto_hook')
+        if not hook:
+            return None
+        size_map = {"S": 0.8, "M": 1.0, "L": 1.3}
+        output_dir = os.path.dirname(video_path)
+        out_path = os.path.join(
+            output_dir, f"hooked_{int(time.time())}_{os.path.basename(video_path)}")
+        add_hook_to_video(
+            video_path, hook.get('text', ''), out_path,
+            position=hook.get('position', 'top'),
+            font_scale=size_map.get(hook.get('size'), 1.0),
+            duration=hook.get('duration_seconds'), style=hook.get('style', 'classic'))
+        return out_path
+    except Exception as e:
+        print(f"⚠️  Could not re-apply hook to {video_path}: {e}")
+        return None
 
 
 def _reapply_captions(job_id, clip_index, video_path):
@@ -1744,6 +1791,9 @@ app.mount("/videos", RestoringStaticFiles(
 THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 app.mount("/thumbnails", StaticFiles(directory=THUMBNAILS_DIR), name="thumbnails")
+
+# Serve the overlay library's video files so the picker can preview them.
+app.mount("/overlay-assets", StaticFiles(directory=str(overlays.OVERLAY_DIR)), name="overlay-assets")
 
 
 def _safe_under(base_dir: str, user_rel_path: str) -> Optional[str]:
@@ -2994,7 +3044,27 @@ from subtitles import generate_srt, generate_ass, burn_subtitles, generate_srt_f
 from hooks import add_hook_to_video
 from translate import translate_video, get_supported_languages
 from thumbnail import (analyze_video_for_titles, refine_titles, generate_thumbnail,
-                       generate_youtube_description, extract_face_frames)
+                       generate_youtube_description, extract_face_frames,
+                       generate_campaign_checklist)
+
+class CampaignBriefRequest(BaseModel):
+    brief_text: str
+
+@app.post("/api/campaign-brief")
+async def campaign_brief(req: CampaignBriefRequest, request: Request):
+    if not req.brief_text or not req.brief_text.strip():
+        raise HTTPException(status_code=400, detail="brief_text is required")
+    api_key = await resolve_gemini(request)
+    if not api_key:
+        raise gemini_missing_error()
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None, generate_campaign_checklist, api_key, req.brief_text
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Checklist generation failed: {e}")
+    return result
 
 class EditRequest(BaseModel):
     job_id: str
@@ -3186,6 +3256,7 @@ class SubtitleRequest(BaseModel):
     clip_index: int
     position: str = "bottom" # top, middle, bottom
     font_size: int = 16
+    margin_v: int = 43  # fine-tune distance from the top/bottom edge (ignored for "middle")
     font_name: str = "Verdana"
     font_color: str = "#FFFFFF"
     border_color: str = "#000000"
@@ -4356,6 +4427,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         border_width=req.border_width, highlight_color=req.highlight_color,
         bg_color=req.bg_color, bg_opacity=req.bg_opacity,
         effect=req.effect, base_opacity=req.base_opacity, uppercase=req.uppercase,
+        margin_v=req.margin_v,
     )
 
     # Output video
@@ -4409,7 +4481,8 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
                            alignment=req.position, fontsize=req.font_size,
                            font_name=req.font_name, font_color=req.font_color,
                            border_color=req.border_color, border_width=req.border_width,
-                           bg_color=req.bg_color, bg_opacity=req.bg_opacity)
+                           bg_color=req.bg_color, bg_opacity=req.bg_opacity,
+                           margin_v=req.margin_v)
         
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_burn)
@@ -4659,6 +4732,147 @@ async def add_hook(req: HookRequest, request: Request):
         "new_video_url": f"/videos/{req.job_id}/{output_filename}",
         "burned_hook": None if req.remove else clip_data['auto_hook'],
     }
+
+
+@app.get("/api/overlays")
+async def get_overlays():
+    return {"overlays": overlays.list_overlays()}
+
+
+class OverlayRequest(BaseModel):
+    job_id: str
+    clip_index: int
+    overlay_id: Optional[str] = None
+    input_filename: Optional[str] = None
+    remove: Optional[bool] = False  # strip the burned overlay instead of adding one
+
+@app.post("/api/overlay")
+async def add_overlay(req: OverlayRequest, request: Request):
+    await require_managed_entitlement(request)
+    await _ensure_job_files(req.job_id, request)
+    if req.job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = jobs[req.job_id]
+    await _assert_job_owner(request, job)
+    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
+    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+
+    if not json_files:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+
+    with open(json_files[0], 'r') as f:
+        data = json.load(f)
+
+    clips = data.get('shorts', [])
+    if req.clip_index >= len(clips):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    clip_data = clips[req.clip_index]
+
+    if req.input_filename:
+        filename = os.path.basename(req.input_filename)
+    else:
+        filename = clip_data.get('video_url', '').split('/')[-1]
+        if not filename:
+            base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
+            filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
+
+    input_path = os.path.join(output_dir, filename)
+    if not os.path.exists(input_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
+
+    if not req.remove and not req.overlay_id:
+        raise HTTPException(status_code=400, detail="overlay_id is required")
+    if not req.remove and overlays.get_overlay(req.overlay_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown overlay: {req.overlay_id}")
+
+    # Layering is base -> overlay -> hook -> captions. Strip captions and hook
+    # off first (same invariant as /api/hook), then strip any existing overlay
+    # too: a new overlay REPLACES the old one rather than stacking. Hook and
+    # captions go back on top afterwards.
+    clean_name = _strip_burned_captions(output_dir, filename)
+    had_captions = clean_name != filename
+    clean_name2 = _strip_burned_hook(output_dir, clean_name)
+    had_hook = clean_name2 != clean_name
+    clean_name3 = _strip_burned_overlay(output_dir, clean_name2)
+    filename = clean_name3
+    input_path = os.path.join(output_dir, clean_name3)
+
+    if req.remove:
+        output_filename = filename
+        output_path = input_path
+        reservation_id = None
+    else:
+        output_filename = f"overlaid_{int(time.time())}_{filename}"
+        output_path = os.path.join(output_dir, output_filename)
+
+        # Meter the FFmpeg overlay re-encode (no-op for BYOK / self-host).
+        overlay_minutes = _cloud_config.HOOK_MINUTES if BILLING_ENABLED else 0
+        reservation_id = await reserve_managed_action(
+            request, overlay_minutes, req.job_id, "overlay")
+
+        try:
+            def run_overlay():
+                overlays.add_overlay_to_video(input_path, req.overlay_id, output_path)
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, run_overlay)
+
+        except Exception as e:
+            print(f"❌ Overlay Error: {e}")
+            if reservation_id:
+                await _metering.release_reservation(reservation_id)
+            raise HTTPException(status_code=500, detail=str(e))
+
+        if reservation_id:
+            await _metering.commit_reservation(reservation_id)
+
+    # Hook and captions back on top, in that order (see _reapply_hook).
+    if had_hook:
+        rehooked = await asyncio.get_event_loop().run_in_executor(
+            None, _reapply_hook, req.job_id, req.clip_index, output_path)
+        if rehooked:
+            output_filename = os.path.basename(rehooked)
+            output_path = rehooked
+
+    if had_captions:
+        recap = await asyncio.get_event_loop().run_in_executor(
+            None, _reapply_captions, req.job_id, req.clip_index, output_path)
+        if recap:
+            output_filename = os.path.basename(recap)
+
+    if req.remove:
+        clip_data.pop('overlay', None)
+    else:
+        clip_data['overlay'] = {"overlay_id": req.overlay_id}
+
+    if req.clip_index < len(job['result']['clips']):
+        mem_clip = job['result']['clips'][req.clip_index]
+        mem_clip['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+        if req.remove:
+            mem_clip.pop('overlay', None)
+        else:
+            mem_clip['overlay'] = clip_data['overlay']
+
+    try:
+        if req.clip_index < len(clips):
+            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+            data['shorts'] = clips
+            with open(json_files[0], 'w') as f:
+                json.dump(data, f, indent=4)
+                print(f"✅ Metadata updated with overlay video for clip {req.clip_index}")
+    except Exception as e:
+        print(f"⚠️ Failed to update metadata.json: {e}")
+
+    _archive_clip_edit_bg(req.job_id, req.clip_index, output_filename)
+
+    return {
+        "success": True,
+        "new_video_url": f"/videos/{req.job_id}/{output_filename}",
+        "overlay": None if req.remove else clip_data['overlay'],
+    }
+
 
 class TranslateRequest(BaseModel):
     job_id: str

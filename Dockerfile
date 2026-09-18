@@ -59,7 +59,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
 
 # Helper token provider, baked in as a local Node script (no separate service).
-RUN git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider /opt/bgutil-provider \
+# ponytail: Railway caches this RUN layer like any Docker build — an unchanged
+# Dockerfile means the "nightly" yt-dlp/bgutil install below silently reuses
+# whatever it fetched on the LAST build, not the day's actual nightly. YouTube's
+# bot-check keeps moving, so a build that's gone stale re-fails with
+# LOGIN_REQUIRED even though the fix is "already" in source. Bump this date to
+# force a fresh clone + fresh yt-dlp on the next deploy.
+ARG YTDLP_REFRESH=2026-09-18
+RUN echo "refresh $YTDLP_REFRESH" >/dev/null \
+    && git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider /opt/bgutil-provider \
     && cd /opt/bgutil-provider/server \
     && npm install --no-audit --no-fund \
     && npx tsc \

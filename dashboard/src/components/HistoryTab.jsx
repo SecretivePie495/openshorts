@@ -100,26 +100,45 @@ export default function HistoryTab({ onReopenProject }) {
                 )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
-                {vids.map((v) => (
-                  <div key={v.id} className="card card-hover overflow-hidden group">
-                    <div className="aspect-[9/16] bg-black">
-                      <video src={v.view_url} controls preload="metadata" className="w-full h-full object-contain" />
-                    </div>
-                    <div className="p-3">
-                      <p className="text-sm text-ink font-medium line-clamp-2 mb-1" title={v.title}>{v.title || 'Short'}</p>
-                      <div className="flex items-center justify-between">
-                        <span className="readout">{fmtDate(v.created_at)}</span>
-                        <a href={v.download_url} className="text-micro font-mono uppercase text-brass hover:text-ink flex items-center gap-1 transition-colors" title="Download">
-                          <Download size={14} /> Download
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                {vids.map((v) => <HistoryVideoCard key={v.id} v={v} fmtDate={fmtDate} />)}
               </div>
             </section>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// Preview box follows the clip's actual aspect ratio (9:16 until metadata
+// loads) instead of a hardcoded 9:16 — a horizontal or square clip forced
+// into a tall box gets fake black bars from object-contain on top of
+// whatever the format itself renders.
+function HistoryVideoCard({ v, fmtDate }) {
+  const [aspect, setAspect] = useState(9 / 16);
+  return (
+    <div className="card card-hover overflow-hidden group">
+      <div className="bg-black" style={{ aspectRatio: aspect }}>
+        <video
+          src={v.view_url}
+          controls
+          preload="metadata"
+          className="w-full h-full object-contain"
+          onLoadedMetadata={(e) => {
+            if (e.target.videoWidth && e.target.videoHeight) {
+              setAspect(e.target.videoWidth / e.target.videoHeight);
+            }
+          }}
+        />
+      </div>
+      <div className="p-3">
+        <p className="text-sm text-ink font-medium line-clamp-2 mb-1" title={v.title}>{v.title || 'Short'}</p>
+        <div className="flex items-center justify-between">
+          <span className="readout">{fmtDate(v.created_at)}</span>
+          <a href={v.download_url} className="text-micro font-mono uppercase text-brass hover:text-ink flex items-center gap-1 transition-colors" title="Download">
+            <Download size={14} /> Download
+          </a>
+        </div>
       </div>
     </div>
   );

@@ -147,6 +147,11 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     // it the current recipe and caps without re-binding.
     const segmentsRef = useRef(segments);
     useEffect(() => { segmentsRef.current = segments; }, [segments]);
+    // `limits` (declared below, off `edl`) has to exist before this ref can
+    // read it — hoisted here so it isn't used in its own temporal dead zone,
+    // which threw "Cannot access 'limits' before initialization" on every
+    // mount and blanked the whole editor.
+    const limits = useMemo(() => edl?.limits || { max_segments: 12, min_segment_seconds: MIN_SEGMENT_SECONDS, max_total_seconds: 180 }, [edl]);
     const limitsRef = useRef(limits);
     useEffect(() => { limitsRef.current = limits; }, [limits]);
     const [paintNote, setPaintNote] = useState(null);
@@ -224,7 +229,6 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const sourceAvailable = !!edl?.source?.available;
     const sourceDuration = edl?.source?.duration || 0;
     const canonical = useMemo(() => edl?.canonical_range || { start: 0, end: 0 }, [edl]);
-    const limits = useMemo(() => edl?.limits || { max_segments: 12, min_segment_seconds: MIN_SEGMENT_SECONDS, max_total_seconds: 180 }, [edl]);
     const minSeg = limits.min_segment_seconds || MIN_SEGMENT_SECONDS;
 
     // The source panel is on screen only when there IS a source and the user
