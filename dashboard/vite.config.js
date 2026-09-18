@@ -14,12 +14,15 @@ export default defineConfig({
   // into #root and emits the static /alternatives pages, sitemap.xml and
   // llms.txt. See vite-plugin-seo.js.
   plugins: [react(), seo()],
-  // esbuild hoists const/let bindings across chunk boundaries during minification,
-  // which violates TDZ and produces "Cannot access 'ae' before initialization" in
-  // production builds. Disabling syntax minification keeps names intact and avoids
-  // the hoist while still tree-shaking and dead-code-eliminating.
-  esbuild: { minifySyntax: false },
   build: {
+    // esbuild's minifier (Vite's default) hoists const/let bindings across chunk
+    // boundaries, which violates TDZ and produced "Cannot access 'ae' before
+    // initialization" in production (the top-level `esbuild.minifySyntax`
+    // option does NOT touch this pass — that's a separate per-file transform,
+    // not the prod minify step — so that earlier fix was a no-op). terser
+    // doesn't have this cross-chunk hoisting bug, so use it instead of eating
+    // the bundle-size cost of no minification.
+    minify: 'terser',
     rollupOptions: {
       onwarn(warning, warn) {
         // Only fail on cycles in our own source; third-party libs like mediabunny

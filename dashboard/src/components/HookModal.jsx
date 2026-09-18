@@ -70,6 +70,13 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     const previewRef = useRef(null);
     const draggingRef = useRef(false);
     const look = HOOK_STYLES.find((st) => st.value === style) || HOOK_STYLES[0];
+    const getSizeStyle = () => {
+        switch (size) {
+            case 'S': return { fontSize: '14px', maxWidth: '80%' };
+            case 'L': return { fontSize: '24px', maxWidth: '95%' };
+            case 'M': default: return { fontSize: '18px', maxWidth: '90%' };
+        }
+    };
     // The preview must show the CHOSEN look — the old hardcoded white card
     // made toggling style and starting a drag both "change the format", so
     // the picker felt broken. Outline looks lose the card entirely.
@@ -131,14 +138,6 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
             case 'center': return 'items-center justify-center';
             case 'bottom': return 'items-center justify-end pb-[20%]';
             case 'top': default: return 'items-center justify-start pt-[20%]';
-        }
-    };
-
-    const getSizeStyle = () => {
-        switch (size) {
-            case 'S': return { fontSize: '14px', maxWidth: '80%' };
-            case 'L': return { fontSize: '24px', maxWidth: '95%' };
-            case 'M': default: return { fontSize: '18px', maxWidth: '90%' };
         }
     };
 
