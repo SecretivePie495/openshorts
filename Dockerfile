@@ -89,6 +89,12 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 # Latest yt-dlp (nightly — it updates frequently) plus its helper plugin.
 RUN pip install --upgrade --pre --no-cache-dir "yt-dlp[default]" bgutil-ytdlp-pot-provider
 
+# BUST_CACHE is a no-op build arg pushed manually to invalidate Railway's
+# layer cache when a stale COPY was observed serving old source (fonts pack
+# rollout, 18-sep-2026) despite a fresh git snapshot.
+ARG BUST_CACHE=""
+RUN echo "cachebust=$BUST_CACHE" >/dev/null
+
 # Copy application code
 COPY . .
 

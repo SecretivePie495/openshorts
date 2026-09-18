@@ -14,6 +14,12 @@ ENV OUTPUT_DIR=/output
 
 WORKDIR /app
 
+# BUST_CACHE is a no-op build arg pushed manually to invalidate Railway's
+# layer cache when a stale COPY was observed serving old source (fonts pack
+# rollout, 18-sep-2026) despite a fresh git snapshot.
+ARG BUST_CACHE=""
+RUN echo "cachebust=$BUST_CACHE" >/dev/null
+
 # Copy render service source
 COPY render-service/package.json ./
 RUN npm install
