@@ -23,6 +23,7 @@ from google.genai import types as genai_types
 
 import gemini_worker
 import hook_grounding
+import postiz_push
 import layout_picker
 import llm_backend
 from clip_selection import (build_transcript_windows, clip_count_targets,
@@ -2194,6 +2195,8 @@ if __name__ == '__main__':
                         # announced, never one that ffmpeg is still writing.
                         print(f"CLIP_READY {i} "
                               f"{os.path.basename(captioned or deliver_path)}")
+                        clip['delivered_file'] = os.path.basename(
+                            captioned or deliver_path)
                     return success
                 finally:
                     if os.path.exists(clip_temp_path):
@@ -2239,6 +2242,10 @@ if __name__ == '__main__':
             if any('auto_hook' in c or 'hook_grounding' in c for c in shorts):
                 with open(metadata_file, 'w') as f:
                     json.dump(clips_data, f, indent=2)
+
+            # Optional publish leg: push finished clips to self-hosted Postiz.
+            # No-op unless POSTIZ_AUTO_PUBLISH=1; never raises.
+            postiz_push.push_clips(output_dir, shorts, clips_data)
 
     # Clean up original if requested
     if args.url and not args.keep_original and os.path.exists(input_video):
