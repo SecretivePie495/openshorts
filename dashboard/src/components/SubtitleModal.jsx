@@ -609,7 +609,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                         <div>
                             <div className="flex justify-between mb-1">
                                 <p className="eyebrow">Size</p>
-                                <span className="readout">{fontSize}</span>
+                                <span className="readout">{fontSize} ({Math.round(fontSize * 2.2)}px on 1080×1920)</span>
                             </div>
                             <input
                                 type="range"

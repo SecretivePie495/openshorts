@@ -466,7 +466,12 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     job_id: jobId,
                     clip_index: index,
                     position: options.position,
-                    font_size: options.fontSize,
+                    // This ASS burn (subtitles.py) scales fontsize*0.85 on a PlayResY=288
+                    // canvas; the Remotion preview scales fontSize*2.2 directly on the real
+                    // 1920px-tall canvas. Uncalibrated, the same slider value rendered ~2.6x
+                    // bigger here than in the preview. Convert to the equivalent size so this
+                    // fallback path matches what was actually previewed.
+                    font_size: options.fontSize * (2.2 * 288 / 1920 / 0.85),
                     margin_v: options.marginV,
                     font_name: options.fontName,
                     font_color: options.fontColor,
