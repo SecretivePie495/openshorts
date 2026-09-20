@@ -14,6 +14,14 @@ _STDIO_CONFIGURED = False
 # German than "base" without being much slower on CPU.
 DEFAULT_WHISPER_MODEL = "small"
 
+# Fonts with a real bold face (system fonts / fontconfig aliases). Every other
+# font name is one of the dafontfree.net pack additions, which ship a single
+# weight — asking libass for Bold=1 on those makes it embolden/substitute,
+# which can visibly diverge from the dashboard preview's own (matching) native
+# weight. Keep this in sync with dashboard/src/remotion/lib/fonts.ts's
+# SUBTITLE_FONTS.
+BASE_FONTS_WITH_BOLD = {"Verdana", "Arial", "Impact", "Helvetica", "Georgia", "Courier New"}
+
 
 def get_whisper_config():
     """Return the faster-whisper model config, overridable via env vars."""
@@ -344,6 +352,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         return "{\\an5}" if any(a <= t < b for a, b in seam_ranges) else ""
 
     safe_font = _sanitize_font_name(font_name)
+    ass_bold = 1 if safe_font in BASE_FONTS_WITH_BOLD else 0
     base_opacity = _clamp_number(base_opacity, 0.05, 1.0, 1.0)
     # Dim inactive words via a fully-opaque scaled color (NOT alpha — see
     # _dim_hex_color); the active word overrides the color inline.
@@ -394,7 +403,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{safe_font},{final_fontsize},{primary_colour},{primary_colour},"
-        f"{outline_colour},{back_colour},1,0,0,0,100,100,0,0,{border_style},"
+        f"{outline_colour},{back_colour},{ass_bold},0,0,0,100,100,0,0,{border_style},"
         f"{outline_width},0,{ass_alignment},10,10,{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
         "\n"
         "[Events]\n"
@@ -508,6 +517,7 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
         final_fontsize = 10
 
     safe_font_name = _sanitize_font_name(font_name)
+    ass_bold = 1 if safe_font_name in BASE_FONTS_WITH_BOLD else 0
     bg_opacity = _clamp_number(bg_opacity, 0.0, 1.0, 0.0)
     border_width = _clamp_number(border_width, 0, 10, 2)
 
@@ -541,7 +551,7 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
         f"Outline={outline_width},"
         f"Shadow=0,"
         f"MarginV={int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},"
-        f"Bold=1"
+        f"Bold={ass_bold}"
     )
 
     # Let libass see the fonts bundled with the app (e.g. Anton for Impact)

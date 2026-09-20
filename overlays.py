@@ -40,12 +40,25 @@ def _probe_duration(path):
     return float(out)
 
 
+def _probe_width(video_path):
+    out = subprocess.check_output(
+        ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+         '-show_entries', 'stream=width', '-of', 'csv=p=0', str(video_path)],
+        timeout=30,
+    ).decode().strip()
+    return int(out)
+
+
 def add_overlay_to_video(video_path, overlay_id, output_path):
-    """Composite a library overlay onto ``video_path``, looped to cover the
-    whole clip. ``blend`` in the manifest picks how the two are combined:
-    'screen'/'lighten'/'add' for a light-on-black effect clip (the common
-    CapCut-pack format), 'alpha' for a file that already carries a real
-    alpha channel (webm/mov).
+    """Composite a library overlay onto ``video_path``.
+
+    Two placements: 'fullframe' (default) loops a video effect clip over the
+    whole frame -- ``blend`` picks how it's combined: 'screen'/'lighten'/'add'
+    for a light-on-black effect clip (the common CapCut-pack format), 'alpha'
+    for a file that already carries a real alpha channel (webm/mov). 'bottom'
+    is a static image (e.g. a game/sponsor banner) anchored to the bottom
+    edge, scaled to the clip's own width so it keeps the asset's aspect ratio
+    instead of stretching to fill the frame like scale2ref would.
     """
     overlay = get_overlay(overlay_id)
     if overlay is None:
@@ -54,23 +67,34 @@ def add_overlay_to_video(video_path, overlay_id, output_path):
         raise FileNotFoundError(f"Video {video_path} not found")
 
     overlay_path = OVERLAY_DIR / overlay["file"]
-    blend = overlay.get("blend", "screen")
     duration = _probe_duration(video_path)
+    placement = overlay.get("placement", "fullframe")
 
-    # scale2ref fits the overlay to the base clip's frame size (the library
-    # assets are rarely authored at the same resolution as a given source).
-    if blend == "alpha":
-        filter_complex = "[1:v][0:v]scale2ref[ovl][base];[base][ovl]overlay=shortest=1"
-    else:
+    if placement == "bottom":
+        width_ratio = overlay.get("width_ratio", 1.0)
+        banner_w = max(1, int(_probe_width(video_path) * width_ratio))
         filter_complex = (
-            "[1:v][0:v]scale2ref[ovl][base];"
-            f"[base][ovl]blend=all_mode='{blend}':shortest=1"
+            f"[1:v]scale={banner_w}:-1,format=rgba[ovl];"
+            "[0:v][ovl]overlay=x=0:y=H-h"
         )
+        input_args = ['-i', str(video_path), '-loop', '1', '-i', str(overlay_path)]
+    else:
+        blend = overlay.get("blend", "screen")
+        # scale2ref fits the overlay to the base clip's frame size (the
+        # library assets are rarely authored at the same resolution as a
+        # given source).
+        if blend == "alpha":
+            filter_complex = "[1:v][0:v]scale2ref[ovl][base];[base][ovl]overlay=shortest=1"
+        else:
+            filter_complex = (
+                "[1:v][0:v]scale2ref[ovl][base];"
+                f"[base][ovl]blend=all_mode='{blend}':shortest=1"
+            )
+        input_args = ['-i', str(video_path), '-stream_loop', '-1', '-i', str(overlay_path)]
 
     cmd = [
         'ffmpeg', '-y',
-        '-i', str(video_path),
-        '-stream_loop', '-1', '-i', str(overlay_path),
+        *input_args,
         '-filter_complex', filter_complex,
         '-map', '0:a?',
         '-t', str(duration),
@@ -91,7 +115,8 @@ def add_overlay_to_video(video_path, overlay_id, output_path):
 
 def demo():
     """ponytail self-check: synth a base clip + a black/white 'flash' overlay,
-    composite with screen blend, assert the output exists and is playable."""
+    composite with screen blend; then a static PNG through the 'bottom'
+    banner placement. Asserts both outputs exist and are playable."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -99,6 +124,7 @@ def demo():
         base = tmp / "base.mp4"
         ovl = tmp / "flash.mp4"
         out = tmp / "out.mp4"
+        banner_out = tmp / "banner_out.mp4"
         OVERLAY_DIR.mkdir(parents=True, exist_ok=True)
         manifest_backup = MANIFEST_PATH.read_bytes() if MANIFEST_PATH.exists() else None
         try:
@@ -109,8 +135,15 @@ def demo():
                              '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(ovl)],
                             check=True, capture_output=True, timeout=60)
             (OVERLAY_DIR / "_demo_flash.mp4").write_bytes(ovl.read_bytes())
+            banner_src = tmp / "banner.png"
+            subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=c=red@0.5:size=200x50',
+                             '-frames:v', '1', str(banner_src)],
+                            check=True, capture_output=True, timeout=30)
+            (OVERLAY_DIR / "_demo_banner.png").write_bytes(banner_src.read_bytes())
             MANIFEST_PATH.write_text(json.dumps([
                 {"id": "_demo_flash", "title": "demo", "category": "test", "file": "_demo_flash.mp4", "blend": "screen"},
+                {"id": "_demo_banner", "title": "demo banner", "category": "test", "file": "_demo_banner.png",
+                 "type": "image", "placement": "bottom"},
             ]))
             assert get_overlay("_demo_flash") is not None
             add_overlay_to_video(str(base), "_demo_flash", str(out))
@@ -118,8 +151,16 @@ def demo():
             dur = _probe_duration(out)
             assert 1.8 <= dur <= 2.2, f"expected ~2s output, got {dur}"
             print(f"✅ overlays.demo: composited {out.stat().st_size} bytes, {dur:.2f}s")
+
+            add_overlay_to_video(str(base), "_demo_banner", str(banner_out))
+            assert banner_out.exists() and banner_out.stat().st_size > 0
+            banner_dur = _probe_duration(banner_out)
+            assert 1.8 <= banner_dur <= 2.2, f"expected ~2s banner output, got {banner_dur}"
+            assert _probe_width(banner_out) == 320, "banner pass must not change base clip width"
+            print(f"✅ overlays.demo: bottom banner composited {banner_out.stat().st_size} bytes, {banner_dur:.2f}s")
         finally:
             (OVERLAY_DIR / "_demo_flash.mp4").unlink(missing_ok=True)
+            (OVERLAY_DIR / "_demo_banner.png").unlink(missing_ok=True)
             if manifest_backup is not None:
                 MANIFEST_PATH.write_bytes(manifest_backup)
             elif MANIFEST_PATH.exists():

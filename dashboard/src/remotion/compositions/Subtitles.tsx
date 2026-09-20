@@ -10,7 +10,7 @@ import {
 } from "remotion";
 import type { SubtitleConfig } from "../lib/types";
 import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
-import { getFontStack, subtitlePackFontFace } from "../lib/fonts";
+import { getFontStack, isPackFont, subtitlePackFontFace } from "../lib/fonts";
 
 interface SubtitlesProps {
   config: SubtitleConfig;
@@ -249,7 +249,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
       style={{
         fontFamily: fontStack,
         fontSize: style.fontSize,
-        fontWeight: 700,
+        fontWeight: isPackFont(style.fontFamily) ? 400 : 700,
         color: animation === "karaoke" && isActive ? undefined : color,
         textShadow:
           animation !== "karaoke"

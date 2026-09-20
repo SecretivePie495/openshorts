@@ -2,8 +2,9 @@ import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo, u
 import {
     X, Loader2, Plus, Trash2, ChevronUp, ChevronDown, Scissors,
     AlertCircle, Undo2, Redo2, ChevronsRight, ChevronsLeft,
-    PanelLeft, PanelLeftClose, Film,
+    PanelLeft, PanelLeftClose, Film, Sparkles,
 } from 'lucide-react';
+import EffectsPanel from './EffectsPanel';
 import { getApiUrl } from '../config';
 import { apiFetch, apiJson, QuotaError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -118,6 +119,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const [renderSeconds, setRenderSeconds] = useState(0);
     const [renderError, setRenderError] = useState(null);
     const [confirmClose, setConfirmClose] = useState(false);
+    const [showEffects, setShowEffects] = useState(false);
+    const [effectsState, setEffectsState] = useState({});
     const [selectedWord, setSelectedWord] = useState(null);
     const [playhead, setPlayhead] = useState(0);
     const [showSource, setShowSource] = useState(() => {
@@ -911,27 +914,28 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         return () => clearInterval(t);
     }, [rendering]);
 
-    const doRender = async () => {
+    // Gather all editor state into one payload the API understands.
+    const buildRequest = () => ({
+        job_id: jobId,
+        clip_index: clipIndex,
+        segments: segments.map((s) => ({ start: s.start, end: s.end })),
+        snap_to_words: false,
+        reapply_captions: reapplyCaptions,
+        framing,
+        sync: false,
+        ...effectsState,
+    });
+
+    const doRender = async (useAdvanced = false) => {
         if (!canRender) return;
         setRendering(true);
         setRenderError(null);
         try {
-            const res = await apiFetch('/api/clip/rerender', {
+            const endpoint = useAdvanced ? '/api/clip/advanced/edit' : '/api/clip/rerender';
+            const res = await apiFetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    job_id: jobId,
-                    clip_index: clipIndex,
-                    segments: segments.map((s) => ({ start: s.start, end: s.end })),
-                    snap_to_words: false, // boundaries are already word-snapped client-side
-                    reapply_captions: reapplyCaptions,
-                    framing,
-                    // Fire, close, move on: the card polls render-status and
-                    // shows its own spinner/green tick. Saving five clips in
-                    // a row used to hold five minute-long POSTs open until
-                    // the proxy dropped them and lied about the result.
-                    sync: false,
-                }),
+                body: JSON.stringify(buildRequest()),
             });
             if (!res.ok) {
                 let detail = `re-render failed (HTTP ${res.status})`;
@@ -945,11 +949,15 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 onRenderQueued?.(clipIndex);
                 return;
             }
-            setRenderedSegments(data.recipe.segments.map((s) => ({ ...s })));
-            setRenderedFraming(data.framing || 'auto');
-            setFraming(data.framing || 'auto');
-            dispatch({ type: 'init', segments: data.recipe.segments.map((s) => ({ ...s })) });
-            setPreviewUrl(`${getApiUrl(data.new_video_url)}?t=${Date.now()}`);
+            if (data.recipe?.segments) {
+                setRenderedSegments(data.recipe.segments.map((s) => ({ ...s })));
+                setRenderedFraming(data.framing || 'auto');
+                setFraming(data.framing || 'auto');
+                dispatch({ type: 'init', segments: data.recipe.segments.map((s) => ({ ...s })) });
+            }
+            if (data.new_video_url) {
+                setPreviewUrl(`${getApiUrl(data.new_video_url)}?t=${Date.now()}`);
+            }
             onRerendered?.(clipIndex, data);
             refreshMe();
         } catch (e) {
@@ -1658,10 +1666,19 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             >
                                 {rendering ? 'close' : dirty ? 'cancel' : 'close'}
                             </button>
-                            <button className="btn-primary flex-1 flex items-center justify-center gap-2" disabled={!canRender || !dirty} onClick={doRender}>
+                            <button className="btn-primary flex-1 flex items-center justify-center gap-2" disabled={!canRender || !dirty || rendering} onClick={() => doRender(false)}>
                                 {rendering
-                                    ? (<><Loader2 size={16} className="animate-spin text-brassink" /> re-rendering… {renderSeconds}s</>)
+                                    ? (<><Loader2 size={16} className="animate-spin text-brassink" /> re-rendering... {renderSeconds}s</>)
                                     : (needsSourcePath ? 're-render from source' : 're-render clip')}
+                            </button>
+                            <button
+                                className="btn-primary flex items-center justify-center gap-2 bg-brass/20 hover:bg-brass/30 disabled:opacity-40"
+                                disabled={!canRender || !dirty || rendering}
+                                onClick={() => setShowEffects(true)}
+                                title="Apply all effects (LUT, transitions, b-roll, audio, text)"
+                            >
+                                <Sparkles size={16} />
+                                apply effects
                             </button>
                         </div>
                         {rendering && (
@@ -1672,6 +1689,16 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     </div>
                 </div>
             </div>
+
+                {showEffects && (
+                    <EffectsPanel
+                        jobId={jobId}
+                        clipIndex={clipIndex}
+                        segments={segments}
+                        onEffectsChange={(state) => setEffectsState(s => ({ ...s, ...state }))}
+                        onClose={() => setShowEffects(false)}
+                    />
+                )}
         </div>
     );
 }

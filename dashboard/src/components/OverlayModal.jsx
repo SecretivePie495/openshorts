@@ -56,11 +56,19 @@ export default function OverlayModal({ isOpen, onClose, onApply, onRemove, isPro
                                         className={`rounded-input border overflow-hidden text-left transition-colors
                                             ${selectedId === o.id ? 'border-[color:var(--color-accent)]' : 'border-rule2 hover:border-[color:var(--color-accent)]'}`}
                                     >
-                                        <video
-                                            src={getApiUrl(`/overlay-assets/${o.file}`)}
-                                            className="w-full aspect-[9/16] object-cover bg-black"
-                                            muted playsInline loop autoPlay
-                                        />
+                                        {o.type === 'image' ? (
+                                            <img
+                                                src={getApiUrl(`/overlay-assets/${o.file}`)}
+                                                className="w-full aspect-[9/16] object-contain bg-black"
+                                                alt=""
+                                            />
+                                        ) : (
+                                            <video
+                                                src={getApiUrl(`/overlay-assets/${o.file}`)}
+                                                className="w-full aspect-[9/16] object-cover bg-black"
+                                                muted playsInline loop autoPlay
+                                            />
+                                        )}
                                         <div className="px-2 py-1.5 flex items-center gap-1">
                                             <Sparkles size={12} className="text-muted shrink-0" />
                                             <span className="text-[11px] text-ink2 truncate">{o.title}</span>

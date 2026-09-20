@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "cod-mw4-banner",
+    "title": "COD: MW4",
+    "category": "game-banners",
+    "file": "cod-mw4-banner.png",
+    "type": "image",
+    "placement": "bottom"
+  }
+]

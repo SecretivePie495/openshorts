@@ -32,6 +32,14 @@ export function getFontStack(fontFamily: string): string {
   return SUBTITLE_FONTS[fontFamily] ?? fontFamily;
 }
 
+// Pack fonts (the dafontfree.net additions) only ship a single 400-weight
+// file each. Forcing fontWeight 700 on them makes the browser fake-bold
+// (embolden) the glyphs, which visibly diverges from the backend's libass
+// render — the base fonts below have real bold cuts, so only they get 700.
+export function isPackFont(fontFamily: string): boolean {
+  return !(fontFamily in SUBTITLE_FONTS);
+}
+
 export const subtitlePackFontFace = `
 @font-face {
   font-family: 'Akira Expanded';

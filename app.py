@@ -32,6 +32,8 @@ from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3
 import recut
 import layout_ranges
 import overlays
+import editor_v2
+import editor_config
 
 load_dotenv()
 
@@ -1748,6 +1750,13 @@ async def lifespan(app: FastAPI):
         # a single job-failure alert is easy to miss and ingest stays broken
         # until someone tops the balance up.
         asyncio.create_task(_alerts.proxy_watch_loop())
+    # Wire editor_v2 callbacks so it can reach app-owned logic without circular imports.
+    _ecb = editor_config.callbacks
+    _ecb.ensure_job_files = _ensure_job_files
+    _ecb.owner_id = _owner_id
+    _ecb.reserve_managed_action = reserve_managed_action
+    _ecb.commit_reservation = lambda rid: _metering.commit_reservation(rid) if _metering else None
+    _ecb.release_reservation = lambda rid: _metering.release_reservation(rid) if _metering else None
     yield
     # Cleanup (optional: cancel worker)
 
@@ -3269,6 +3278,8 @@ class SubtitleRequest(BaseModel):
     base_opacity: float = 1.0  # opacity of non-active words (dimmed modern look)
     uppercase: bool = False
     input_filename: Optional[str] = None
+    max_chars: int = 20  # max chars per subtitle event; set to 1 for one-word-at-a-time mode
+    one_word: bool = False  # legacy alias for max_chars=1
     # User-edited caption words. When present, the burn uses them VERBATIM
     # instead of regenerating from the stored transcript — without this, text
     # edits in the modal were silently discarded on the server render path.
@@ -4144,6 +4155,155 @@ async def _reframe_execute(ctx):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Advanced Editor ──────────────────────────────────────────────────────────
+# editor_v2's own item classes (Transition, AudioTrack, ...) are plain
+# BaseItem subclasses, not pydantic models (editor_v2 runs without FastAPI
+# installed for standalone checks) — so request-body validation lives here,
+# and the endpoint converts into editor_v2's classes before calling in.
+
+class AdvancedTransitionBody(BaseModel):
+    type: str = "none"
+    duration: float = 0.5
+
+
+class AdvancedAudioTrackBody(BaseModel):
+    id: Optional[str] = None
+    file_path: str
+    start: float = 0
+    end: float = 0
+    volume: float = 1.0
+    fadeIn: float = 0.0
+    fadeOut: float = 0.0
+    sourceStart: float = 0.0
+    sourceEnd: Optional[float] = None
+
+
+class AdvancedBrollTrackBody(BaseModel):
+    id: Optional[str] = None
+    file_path: str
+    start: float = 0
+    end: float = 0
+    position: Dict[str, float] = {"x": 0, "y": 0}
+    scale: float = 1.0
+    opacity: float = 1.0
+    z_index: int = 0
+    mute: bool = False
+
+
+class AdvancedTextElementBody(BaseModel):
+    id: Optional[str] = None
+    start: float = 0
+    end: float = 0
+    content: str = ""
+    font: str = "Arial"
+    fontSize: int = 36
+    color: str = "#ffffff"
+    bold: bool = False
+    position: Dict[str, float] = {"x": 50, "y": 90}
+    scale: float = 1.0
+    animation: Optional[str] = None
+
+
+class AdvancedEditBody(BaseModel):
+    job_id: str
+    clip_index: int
+    segments: List[RerenderSegment]
+    snap_to_words: bool = False
+    reapply_captions: bool = False
+    sync: bool = True
+    framing: Optional[str] = None
+    transitions: List[AdvancedTransitionBody] = []
+    audio_tracks: List[AdvancedAudioTrackBody] = []
+    broll_tracks: List[AdvancedBrollTrackBody] = []
+    text_elements: List[AdvancedTextElementBody] = []
+    effect: Optional[Dict[str, Any]] = None
+    overlay_ids: List[str] = []
+    reapply_hook: bool = False
+
+
+@app.post("/api/clip/advanced/edit")
+async def advanced_edit(body: AdvancedEditBody, request: Request):
+    """Advanced editor save: composes transitions, LUTs, overlays, b-roll,
+    text elements, and audio tracks on top of a recut clip."""
+    req = editor_v2.AdvancedEditRequest(
+        job_id=body.job_id,
+        clip_index=body.clip_index,
+        segments=[s.dict() for s in body.segments],
+        snap_to_words=body.snap_to_words,
+        reapply_captions=body.reapply_captions,
+        sync=body.sync,
+        framing=body.framing,
+        transitions=[editor_v2.Transition(**t.dict()) for t in body.transitions],
+        audio_tracks=[editor_v2.AudioTrack(**a.dict()) for a in body.audio_tracks],
+        broll_tracks=[editor_v2.BrollTrack(**b.dict()) for b in body.broll_tracks],
+        text_elements=[editor_v2.TextElement(**t.dict()) for t in body.text_elements],
+        effect=body.effect,
+        overlay_ids=body.overlay_ids,
+        reapply_hook=body.reapply_hook,
+    )
+    await require_managed_entitlement(request)
+    await _ensure_job_files(req.job_id, request)
+    if req.job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[req.job_id]
+    await _assert_job_owner(request, job)
+
+    async def _prepare():
+        return await editor_v2._advanced_prepare(req, request, job)
+
+    async def _execute(ctx):
+        return await editor_v2._advanced_execute(ctx)
+
+    if req.sync:
+        lock = _rerender_locks.setdefault(req.job_id, asyncio.Lock())
+        async with lock:
+            ctx = await _prepare()
+            return await _execute(ctx)
+
+    rec = _render_record(req.job_id, req.clip_index)
+    asyncio.create_task(_run_render_job(
+        "advanced_edit", req.job_id, req.clip_index, rec,
+        prepare=_prepare, execute=_execute))
+    return {"success": True, "queued": True, "render_id": rec["id"], "state": "queued"}
+
+
+@app.get("/api/editor/luts")
+async def list_luts(request: Request):
+    """List available LUT presets for the advanced editor."""
+    await require_managed_entitlement(request)
+    return {"luts": editor_v2.list_luts()}
+
+
+@app.post("/api/clip/advanced/upload-audio")
+async def upload_advanced_audio(
+    job_id: str,
+    clip_index: int,
+    file: UploadFile = File(...),
+    request: Request = None,
+):
+    await require_managed_entitlement(request)
+    await _ensure_job_files(job_id, request)
+    user_id = await _owner_id(request)
+    content = await file.read()
+    result = await editor_v2.upload_audio(job_id, clip_index, content, file.filename, user_id)
+    return {"ok": True, **result}
+
+
+@app.post("/api/clip/advanced/upload-broll")
+async def upload_advanced_broll(
+    job_id: str,
+    clip_index: int,
+    file: UploadFile = File(...),
+    request: Request = None,
+):
+    await require_managed_entitlement(request)
+    await _ensure_job_files(job_id, request)
+    user_id = await _owner_id(request)
+    content = await file.read()
+    result = await editor_v2.upload_broll(job_id, clip_index, content, file.filename, user_id)
+    return {"ok": True, **result}
+
+
 @app.get("/api/clip/{job_id}/{clip_index}/render-status")
 async def clip_render_status(job_id: str, clip_index: int, request: Request):
     """Poll target for the queued (sync=false) rerender/reframe: queued →
@@ -4420,6 +4580,8 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
     # recorded there.
     seam_ranges = layout_ranges.split_ranges(
         clip_data.get('layout_ranges') or layout_ranges.read(input_path))
+    # one_word mode collapses to a single word per ASS event — set max_chars to 1.
+    _mc = min(200, max(1, req.max_chars if not req.one_word else 1))
     karaoke_opts = dict(
         split_ranges=seam_ranges,
         alignment=req.position, fontsize=req.font_size, font_name=req.font_name,
@@ -4427,7 +4589,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         border_width=req.border_width, highlight_color=req.highlight_color,
         bg_color=req.bg_color, bg_opacity=req.bg_opacity,
         effect=req.effect, base_opacity=req.base_opacity, uppercase=req.uppercase,
-        margin_v=req.margin_v,
+        margin_v=req.margin_v, max_chars=_mc,
     )
 
     # Output video

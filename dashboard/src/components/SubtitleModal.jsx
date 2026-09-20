@@ -161,9 +161,25 @@ const ANIMATION_OPTIONS = [
     { value: 'pop', label: 'Pop' },
     { value: 'word-highlight', label: 'Glow' },
     { value: 'karaoke', label: 'Karaoke' },
-    { value: 'scale-in', label: 'Scale In' },
+    // The burned video has no block-level entrance animation (subtitles.py's
+    // ASS effects are all per-word), so this can never match the render —
+    // label it clearly instead of letting it silently diverge.
+    { value: 'scale-in', label: 'Scale In (preview only)' },
     { value: 'none', label: 'None' },
 ];
+
+// The server only knows style ("classic" | "karaoke") + effect
+// ("none" | "glow" | "pop" | "box") — this is the single mapping from the
+// preview's Animation choice to what actually gets burned, so picking an
+// animation (not just clicking a Preset card) keeps the two in sync. Inverse
+// of this same mapping lives in applyPreset.
+const ANIMATION_TO_BURN = {
+    pop: { style: 'karaoke', effect: 'pop' },
+    'word-highlight': { style: 'karaoke', effect: 'glow' },
+    karaoke: { style: 'karaoke', effect: 'none' },
+    'scale-in': { style: 'karaoke', effect: 'none' }, // closest available burn; no true scale-in server-side
+    none: { style: 'classic', effect: 'none' },
+};
 
 const POSITION_OPTIONS = [
     { value: 'top', label: 'top' },
@@ -208,8 +224,14 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [borderWidth, setBorderWidth] = useState(2);
     const [bgColor, setBgColor] = useState('#000000');
     const [bgOpacity, setBgOpacity] = useState(0.0);
-    const [animation, setAnimation] = useState('pop');
+    // Matches the default style/effect below (classic burn, no highlighting) —
+    // these three used to start out of sync, so the very first preview a user
+    // saw (an animated "pop") never matched the very first render (static).
+    const [animation, setAnimation] = useState('none');
     const [showTextEditor, setShowTextEditor] = useState(false);
+    // One-word-at-a-time mode: collapses each ASS event to a single word.
+    // Mirrors the server's max_chars=1 path used by the advanced editor.
+    const [oneWord, setOneWord] = useState(false);
 
     // Karaoke (server-side ASS burn) state
     const [style, setStyle] = useState('classic'); // classic | karaoke
@@ -278,6 +300,20 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         setBgOpacity(0);
         // Keep the Remotion preview roughly in sync with the burned look
         setAnimation(p.style === 'karaoke' ? (p.effect === 'pop' ? 'pop' : p.effect === 'glow' ? 'word-highlight' : 'karaoke') : 'none');
+    };
+
+    // Picking an animation directly (not via a Preset card) used to only
+    // update the preview, leaving style/effect — what actually gets burned —
+    // pointed at whatever a previous preset (or the defaults) had set. That's
+    // why the render could look different from what was just previewed.
+    const onAnimationChange = (value) => {
+        setAnimation(value);
+        const burn = ANIMATION_TO_BURN[value];
+        if (burn) {
+            setStyle(burn.style);
+            setEffect(burn.effect);
+        }
+        setActivePreset(null);
     };
 
     // Remotion preview state
@@ -416,62 +452,67 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             </div>
                         </>
                     )}
-                    {/* Drag-to-move / drag-to-resize handles, mirroring the hook overlay */}
+                    {/* Drag-to-move / drag-to-resize handles, stacked in the
+                        subtitle's top-right corner instead of both hovering
+                        over the text (they used to nearly overlap there). */}
                     {!captionsLoading && (
                         <div
-                            onPointerDown={startMoveDrag}
-                            onPointerMove={onHandleDragMove}
-                            onPointerUp={onHandleDragEnd}
                             style={{
                                 position: 'absolute',
                                 left: `${handlePos.x * 100}%`,
                                 top: `${handlePos.y * 100}%`,
-                                transform: freePos ? 'translate(-50%, -50%)'
-                                    : position === 'bottom' ? 'translate(-50%, 6px)' : 'translate(-50%, -18px)',
-                                cursor: 'grab',
+                                transform: freePos ? 'translate(14px, -100%)'
+                                    : position === 'bottom' ? 'translate(90px, 6px)' : 'translate(90px, -18px)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'flex-start',
+                                gap: 6,
                                 zIndex: 20,
-                                padding: '4px 8px',
-                                borderRadius: 999,
-                                background: 'rgba(0,0,0,0.55)',
-                                border: '1px dashed rgba(255,255,255,0.7)',
-                                color: '#fff',
-                                fontSize: 10,
-                                letterSpacing: '0.05em',
-                                textTransform: 'uppercase',
-                                touchAction: 'none',
-                                userSelect: 'none',
                             }}
                         >
-                            ⠿ drag to move
-                        </div>
-                    )}
-                    {!captionsLoading && (
-                        <div
-                            onPointerDown={startResizeDrag}
-                            onPointerMove={onHandleDragMove}
-                            onPointerUp={onHandleDragEnd}
-                            style={{
-                                position: 'absolute',
-                                left: `${handlePos.x * 100}%`,
-                                top: `${handlePos.y * 100}%`,
-                                transform: freePos ? 'translate(24px, -50%)'
-                                    : position === 'bottom' ? 'translate(56px, 6px)' : 'translate(56px, -18px)',
-                                cursor: 'ns-resize',
-                                zIndex: 20,
-                                padding: '4px 8px',
-                                borderRadius: 999,
-                                background: 'rgba(0,0,0,0.55)',
-                                border: '1px dashed rgba(255,255,255,0.7)',
-                                color: '#fff',
-                                fontSize: 10,
-                                letterSpacing: '0.05em',
-                                textTransform: 'uppercase',
-                                touchAction: 'none',
-                                userSelect: 'none',
-                            }}
-                            title="Drag up/down to resize"
-                        >
-                            ⤢ size
+                            <div
+                                onPointerDown={startMoveDrag}
+                                onPointerMove={onHandleDragMove}
+                                onPointerUp={onHandleDragEnd}
+                                style={{
+                                    cursor: 'grab',
+                                    padding: '4px 8px',
+                                    borderRadius: 999,
+                                    background: 'rgba(0,0,0,0.55)',
+                                    border: '1px dashed rgba(255,255,255,0.7)',
+                                    color: '#fff',
+                                    fontSize: 10,
+                                    letterSpacing: '0.05em',
+                                    textTransform: 'uppercase',
+                                    touchAction: 'none',
+                                    userSelect: 'none',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                ⠿ drag to move
+                            </div>
+                            <div
+                                onPointerDown={startResizeDrag}
+                                onPointerMove={onHandleDragMove}
+                                onPointerUp={onHandleDragEnd}
+                                style={{
+                                    cursor: 'ns-resize',
+                                    padding: '4px 8px',
+                                    borderRadius: 999,
+                                    background: 'rgba(0,0,0,0.55)',
+                                    border: '1px dashed rgba(255,255,255,0.7)',
+                                    color: '#fff',
+                                    fontSize: 10,
+                                    letterSpacing: '0.05em',
+                                    textTransform: 'uppercase',
+                                    touchAction: 'none',
+                                    userSelect: 'none',
+                                    whiteSpace: 'nowrap',
+                                }}
+                                title="Drag up/down to resize"
+                            >
+                                ⤢ size
+                            </div>
                         </div>
                     )}
                 </div>
@@ -590,10 +631,28 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <SegmentedControl
                                 options={ANIMATION_OPTIONS}
                                 value={animation}
-                                onChange={setAnimation}
+                                onChange={onAnimationChange}
                                 columns={2}
                                 size="sm"
                             />
+                        </div>
+
+                        {/* One-word-at-a-time toggle */}
+                        <div className="flex items-center justify-between py-2">
+                            <span className="eyebrow">One word at a time</span>
+                            <button
+                                type="button"
+                                onClick={() => setOneWord(v => !v)}
+                                className={`w-10 h-5 rounded-full transition-colors relative ${
+                                    oneWord ? 'bg-brass' : 'bg-rule-2'
+                                }`}
+                            >
+                                <span
+                                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                        oneWord ? 'translate-x-5' : 'translate-x-0.5'
+                                    }`}
+                                />
+                            </button>
                         </div>
 
                         {/* Editable Transcript (collapsible) */}
@@ -752,6 +811,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 position: fallbackPosition, fontSize, marginV: fallbackMarginV, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
                                 // Karaoke burn (server-side ASS render)
                                 style, effect, baseOpacity, uppercase, highlightColor,
+                                one_word: oneWord,
                                 // Remotion data
                                 remotion: useRemotionPreview ? subtitleConfig : null,
                                 captions: textEdited ? captions : null,
