@@ -434,10 +434,14 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
         setIsSubtitling(true);
         setEditError(null);
         try {
-            // Karaoke styles are burned server-side (ASS word-highlight render);
-            // the in-browser Remotion path only handles classic styles, and only
-            // when the server file has no burned-in content to preserve.
-            if (options.remotion && options.style !== 'karaoke' && !hasServerBurns) {
+            // Always render subtitles (any style, including karaoke) through the
+            // same client-side Remotion path used for the live preview — it's the
+            // only way preview and applied output are guaranteed pixel-identical,
+            // since they share one component. The FFmpeg/ASS path below is a
+            // different renderer and can only approximate the preview's look, so
+            // it's used only when there's pre-existing server-burned content to
+            // preserve, or when the Remotion preview data wasn't available.
+            if (options.remotion && !hasServerBurns) {
                 // Accumulate layer and render all layers together
                 const newLayers = { ...activeLayers, subtitles: options.remotion };
                 setActiveLayers(newLayers);
