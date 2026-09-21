@@ -138,6 +138,21 @@ def _post_slot(target, clip, file_ref, caption):
         # Standalone channels validate post_type as post|story only; videos
         # are published as Reels automatically when media is a video.
         settings.setdefault("post_type", "post")
+    elif ttype == "tiktok":
+        # Every tiktok setting is API-required even in UPLOAD mode, where
+        # TikTok silently discards all but the title/content. UPLOAD = the
+        # clip lands in the account's TikTok app inbox for a manual post —
+        # the only mode an unaudited app can use (DIRECT_POST is refused
+        # with "App not approved for public posting").
+        settings.setdefault("privacy_level", "PUBLIC_TO_EVERYONE")
+        settings.setdefault("duet", False)
+        settings.setdefault("stitch", False)
+        settings.setdefault("comment", True)
+        settings.setdefault("autoAddMusic", "no")
+        settings.setdefault("brand_content_toggle", False)
+        settings.setdefault("brand_organic_toggle", False)
+        settings.setdefault("content_posting_method",
+                            os.environ.get("POSTIZ_TIKTOK_METHOD", "UPLOAD"))
     slot = {
         "integration": {"id": target["integration"]},
         "value": [{"content": caption, "image": [file_ref]}],
