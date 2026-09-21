@@ -370,6 +370,104 @@ def create_hook_image(text, target_width, output_image_path="hook_overlay.png", 
     img.save(output_image_path)
     return output_image_path, canvas_w, canvas_h
 
+def add_logo_to_video(video_path, logo_config, output_path, position="top-right", scale=0.5, opacity=1.0, x_pct=None, y_pct=None):
+    """Overlays a logo image onto video using FFmpeg overlay filter.
+
+    logo_config: dict with keys 'url' (local path) and optional aspect info.
+    position: one of 'top-left', 'top-right', 'bottom-left', 'bottom-right'.
+    scale: 0.2–2.0 multiplier on the logo's natural width.
+    opacity: 0–1 alpha blend factor.
+    x_pct/y_pct: free-drag center point (0-1), overrides position preset.
+    """
+    import base64
+    import io
+    from PIL import Image
+
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video {video_path} not found")
+
+    # Load video dimensions
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_path]
+        res = subprocess.check_output(cmd, timeout=60).decode().strip()
+        dims = res.split('\n')[0].split('x')
+        video_width = int(dims[0])
+        video_height = int(dims[1])
+    except Exception as e:
+        print(f"⚠️ FFprobe failed: {e}. Assuming 1080x1920")
+        video_width = 1080
+        video_height = 1920
+
+    # Load logo image
+    logo_data = logo_config.get('data')
+    logo_path = logo_config.get('path')
+    if logo_data:
+        # Base64 data URL
+        header, b64 = logo_data.split(',', 1) if ',' in logo_data else ('', logo_data)
+        img_bytes = base64.b64decode(b64)
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert('RGBA')
+    elif logo_path and os.path.exists(logo_path):
+        pil_img = Image.open(logo_path).convert('RGBA')
+    else:
+        raise ValueError("Logo config must have 'data' (base64) or 'path'")
+
+    # Scale
+    target_w = int(pil_img.width * scale)
+    target_h = int(pil_img.height * scale)
+    pil_img = pil_img.resize((target_w, target_h), Image.LANCZOS)
+
+    # Apply opacity by blending with transparent background
+    if opacity < 1.0:
+        r, g, b, a = pil_img.split()
+        a = a.point(lambda p: int(p * opacity))
+        pil_img = Image.merge('RGBA', (r, g, b, a))
+
+    # Calculate position
+    if x_pct is not None and y_pct is not None:
+        overlay_x = int(video_width * x_pct) - target_w // 2
+        overlay_y = int(video_height * y_pct) - target_h // 2
+        overlay_x = max(0, min(overlay_x, video_width - target_w))
+        overlay_y = max(0, min(overlay_y, video_height - target_h))
+    else:
+        positions = {
+            "top-left": (int(video_width * 0.03), int(video_height * 0.08)),
+            "top-right": (int(video_width * 0.03), int(video_height * 0.08)),
+            "bottom-left": (int(video_width * 0.03), int(video_height * 0.88)),
+            "bottom-right": (int(video_width * 0.03), int(video_height * 0.88)),
+        }
+        overlay_x, overlay_y = positions.get(position, positions["top-right"])
+        if "right" in position:
+            overlay_x = video_width - target_w - int(video_width * 0.03)
+        if "bottom" in position:
+            overlay_y = video_height - target_h - int(video_height * 0.08)
+
+    # Save temp image
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    logo_filename = f"temp_logo_{uuid.uuid4().hex[:8]}_{_truncate_bytes(stem, 60)}.png"
+    try:
+        pil_img.save(logo_filename, 'PNG')
+        print(f"🎬 Overlaying logo at {overlay_x},{overlay_y}")
+
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',
+            '-i', video_path,
+            '-i', logo_filename,
+            '-filter_complex', f"[0:v][1:v]overlay={overlay_x}:{overlay_y}",
+            '-c:a', 'copy',
+            *video_encode_args(QUALITY),
+            *METADATA_SCRUB,
+            '-movflags', '+faststart',
+            output_path
+        ]
+
+        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1800)
+        print(f"✅ Logo added to {output_path}")
+        return True
+    finally:
+        if os.path.exists(logo_filename):
+            os.remove(logo_filename)
+
+
 def add_hook_to_video(video_path, text, output_path, position="top", font_scale=1.0, duration=None, style="classic", x_pct=None, y_pct=None):
     """
     Overlays text hook onto video.

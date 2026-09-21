@@ -3055,7 +3055,7 @@ async def _ensure_job_files(job_id: str, request: Request) -> bool:
 
 from editor import VideoEditor
 from subtitles import generate_srt, generate_ass, burn_subtitles, generate_srt_from_video
-from hooks import add_hook_to_video
+from hooks import add_hook_to_video, add_logo_to_video
 from translate import translate_video, get_supported_languages
 from thumbnail import (analyze_video_for_titles, refine_titles, generate_thumbnail,
                        generate_youtube_description, extract_face_frames,
@@ -5038,6 +5038,151 @@ async def add_overlay(req: OverlayRequest, request: Request):
         "success": True,
         "new_video_url": f"/videos/{req.job_id}/{output_filename}",
         "overlay": None if req.remove else clip_data['overlay'],
+    }
+
+
+class LogoRequest(BaseModel):
+    job_id: str
+    clip_index: int
+    input_filename: Optional[str] = None
+    remove: Optional[bool] = False  # strip the burned logo instead of adding one
+    # Logo config passed from client (base64 data URL)
+    logo_data: Optional[str] = None  # base64-encoded PNG/JPG
+    position: Optional[str] = "top-right"  # top-left, top-right, bottom-left, bottom-right
+    scale: Optional[float] = 0.5  # 0.2–2.0
+    opacity: Optional[float] = 1.0  # 0–1
+    x_pct: Optional[float] = None  # free-drag center point (0-1)
+    y_pct: Optional[float] = None
+
+
+@app.post("/api/logo")
+async def add_logo(req: LogoRequest, request: Request):
+    await require_managed_entitlement(request)
+    await _ensure_job_files(req.job_id, request)
+    if req.job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = jobs[req.job_id]
+    await _assert_job_owner(request, job)
+    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
+    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+
+    if not json_files:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+
+    with open(json_files[0], 'r') as f:
+        data = json.load(f)
+
+    clips = data.get('shorts', [])
+    if req.clip_index >= len(clips):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    clip_data = clips[req.clip_index]
+
+    # Video Path
+    if req.input_filename:
+        filename = os.path.basename(req.input_filename)
+    else:
+        filename = clip_data.get('video_url', '').split('/')[-1]
+        if not filename:
+            base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
+            filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
+
+    input_path = os.path.join(output_dir, filename)
+    if not os.path.exists(input_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
+
+    # Strip existing burns so we rebuild clean: captions -> hook -> overlay -> logo
+    clean_name = _strip_burned_captions(output_dir, filename)
+    had_captions = clean_name != filename
+    clean_name = _strip_burned_hook(output_dir, clean_name)
+    clean_name = _strip_burned_overlay(output_dir, clean_name)
+    filename = clean_name
+    input_path = os.path.join(output_dir, clean_name)
+
+    if req.remove:
+        output_filename = filename
+        output_path = input_path
+        reservation_id = None
+    else:
+        if not req.logo_data:
+            raise HTTPException(status_code=400, detail="Logo data is required")
+
+        output_filename = f"logod_{int(time.time())}_{filename}"
+        output_path = os.path.join(output_dir, output_filename)
+
+        # Meter the FFmpeg overlay re-encode
+        hook_minutes = _cloud_config.HOOK_MINUTES if BILLING_ENABLED else 0
+        reservation_id = await reserve_managed_action(
+            request, hook_minutes, req.job_id, "logo")
+
+        try:
+            def run_logo():
+                add_logo_to_video(
+                    input_path,
+                    {'data': req.logo_data},
+                    output_path,
+                    position=req.position,
+                    scale=req.scale,
+                    opacity=req.opacity,
+                    x_pct=req.x_pct,
+                    y_pct=req.y_pct,
+                )
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, run_logo)
+
+        except Exception as e:
+            print(f"❌ Logo Error: {e}")
+            if reservation_id:
+                await _metering.release_reservation(reservation_id)
+            raise HTTPException(status_code=500, detail=str(e))
+
+        if reservation_id:
+            await _metering.commit_reservation(reservation_id)
+
+    # Reapply captions on top if they were stripped
+    if had_captions:
+        recap = await asyncio.get_event_loop().run_in_executor(
+            None, _reapply_captions, req.job_id, req.clip_index, output_path)
+        if recap:
+            output_filename = os.path.basename(recap)
+
+    # Record the burned logo so the editor knows what the clip carries
+    if req.remove:
+        clip_data.pop('logo', None)
+    else:
+        clip_data['logo'] = {
+            "position": req.position,
+            "scale": req.scale,
+            "opacity": req.opacity,
+        }
+
+    # Update persistence
+    if req.clip_index < len(job['result']['clips']):
+        mem_clip = job['result']['clips'][req.clip_index]
+        mem_clip['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+        if req.remove:
+            mem_clip.pop('logo', None)
+        else:
+            mem_clip['logo'] = clip_data['logo']
+
+    try:
+        if req.clip_index < len(clips):
+            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+            data['shorts'] = clips
+            with open(json_files[0], 'w') as f:
+                json.dump(data, f, indent=4)
+                print(f"✅ Metadata updated with logo video for clip {req.clip_index}")
+    except Exception as e:
+        print(f"⚠️ Failed to update metadata.json: {e}")
+
+    _archive_clip_edit_bg(req.job_id, req.clip_index, output_filename)
+
+    return {
+        "success": True,
+        "new_video_url": f"/videos/{req.job_id}/{output_filename}",
+        "burned_logo": None if req.remove else clip_data['logo'],
     }
 
 

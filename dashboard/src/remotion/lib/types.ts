@@ -82,6 +82,16 @@ export interface EffectsConfig {
   segments: EffectSegment[];
 }
 
+// --- Logo config ---
+export type LogoPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+export interface LogoConfig {
+  url: string; // data URL (base64) or absolute path for server burn
+  position: LogoPosition;
+  scale: number; // 0.2 to 2.0
+  opacity: number; // 0 to 1
+}
+
 // --- Main composition props ---
 export interface ShortVideoProps {
   videoUrl: string;
@@ -92,6 +102,7 @@ export interface ShortVideoProps {
   subtitles: SubtitleConfig | null;
   hook: HookConfig | null;
   effects: EffectsConfig | null;
+  logo: LogoConfig | null;
 }
 
 // --- Zod schemas for validation (used by render service) ---
@@ -161,4 +172,12 @@ export const shortVideoPropsSchema = z.object({
   subtitles: subtitleConfigSchema.nullable(),
   hook: hookConfigSchema.nullable(),
   effects: effectsConfigSchema.nullable(),
+  logo: z
+    .object({
+      url: z.string(),
+      position: z.enum(["top-left", "top-right", "bottom-left", "bottom-right"]),
+      scale: z.number().min(0.2).max(2),
+      opacity: z.number().min(0).max(1),
+    })
+    .nullable(),
 });

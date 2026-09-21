@@ -5,6 +5,7 @@ import { apiFetch } from '../lib/api';
 import SubtitleModal from './SubtitleModal';
 import HookModal from './HookModal';
 import OverlayModal from './OverlayModal';
+import LogoModal from './LogoModal';
 import TranslateModal from './TranslateModal';
 import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
@@ -79,7 +80,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     // subtitled file (double-subtitle bug).
     const stripBurns = (filename) => {
         let f = filename || '', prev;
-        do { prev = f; f = f.replace(/^subtitled_\d+_/, '').replace(/^hooked_\d+_/, '').replace(/^hook_/, ''); } while (f !== prev);
+        do { prev = f; f = f.replace(/^subtitled_\d+_/, '').replace(/^hooked_\d+_/, '').replace(/^hook_/, '').replace(/^logod_\d+_/, ''); } while (f !== prev);
         return f;
     };
     const originalVideoUrl = getApiUrl((clip.video_url || '').replace(/[^/]+$/, stripBurns((clip.video_url || '').split('/').pop())));
@@ -233,9 +234,11 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [isHooking, setIsHooking] = useState(false);
     const [isOverlaying, setIsOverlaying] = useState(false);
     const [isTranslating, setIsTranslating] = useState(false);
+    const [isLogoing, setIsLogoing] = useState(false);
     const [showHookModal, setShowHookModal] = useState(false);
     const [showOverlayModal, setShowOverlayModal] = useState(false);
     const [showTranslateModal, setShowTranslateModal] = useState(false);
+    const [showLogoModal, setShowLogoModal] = useState(false);
     const [editError, setEditError] = useState(null);
 
     const [clipDuration, setClipDuration] = useState(() => {
@@ -246,7 +249,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     // Accumulate Remotion layers across operations. A reopened project restores
     // the layers persisted in its project state, so the next edit composes over
     // them instead of silently dropping previous browser-side work.
-    const [activeLayers, setActiveLayers] = useState(initialState?.active_layers || { subtitles: null, hook: null, effects: null });
+    const [activeLayers, setActiveLayers] = useState(initialState?.active_layers || { subtitles: null, hook: null, effects: null, logo: null });
 
     // Report edit state upward (debounced sync to the project record). Skip the
     // mount run: only user-driven changes are worth persisting.
@@ -260,7 +263,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     // True when the current server file already carries burned-in content.
     // Browser (Remotion) renders compose over the ORIGINAL clip, so using them
     // here would silently drop those burns — chain via server FFmpeg instead.
-    const hasServerBurns = /(^|_)(subtitled|hook|hooked)_/.test(serverVideoFile || '');
+    const hasServerBurns = /(^|_)(subtitled|hook|hooked|logod)_/.test(serverVideoFile || '');
 
     // The hook currently burned into the server file (auto-hook or a manual
     // one). /api/hook REPLACES it; tracked locally so the modal stays honest
@@ -270,6 +273,9 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     // The overlay currently burned into the server file, if any (same
     // tracking rationale as burnedHook).
     const [burnedOverlay, setBurnedOverlay] = useState(clip.overlay || null);
+
+    // The logo currently burned into the server file, if any.
+    const [burnedLogo, setBurnedLogo] = useState(clip.logo || null);
 
     // Fetch clip duration from transcript endpoint
     useEffect(() => {
@@ -473,6 +479,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     subtitles: newLayers.subtitles,
                     hook: newLayers.hook,
                     effects: newLayers.effects,
+                    logo: newLayers.logo,
                 });
                 setCurrentVideoUrl(blobUrl);
                 if (videoRef.current) videoRef.current.load();
@@ -561,6 +568,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     subtitles: newLayers.subtitles,
                     hook: newLayers.hook,
                     effects: newLayers.effects,
+                    logo: newLayers.logo,
                 });
                 setCurrentVideoUrl(blobUrl);
                 if (videoRef.current) videoRef.current.load();
@@ -595,6 +603,10 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             if (data.new_video_url) {
                 setCurrentVideoUrl(getApiUrl(data.new_video_url));
                 setServerVideoFile(data.new_video_url.split('/').pop());
+                // The server file now carries the burned hook; clear the
+                // in-memory layer so subsequent subtitle edits don't compose
+                // a second Remotion hook on top of the FFmpeg one.
+                setActiveLayers(prev => ({ ...prev, hook: null }));
                 setBurnedHook(data.burned_hook?.text ?? payload.text ?? null);
                 if (videoRef.current) videoRef.current.load();
                 setShowHookModal(false);
@@ -699,6 +711,74 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setTimeout(() => setEditError(null), 5000);
         } finally {
             setIsOverlaying(false);
+        }
+    };
+
+    const handleLogo = async (payload) => {
+        setIsLogoing(true);
+        setEditError(null);
+        try {
+            const res = await apiFetch('/api/logo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    clip_index: index,
+                    input_filename: serverVideoFile,
+                    logo_data: payload.remotion?.url || null,
+                    position: payload.position,
+                    scale: payload.scale,
+                    opacity: payload.opacity,
+                    x_pct: payload.x_pct,
+                    y_pct: payload.y_pct,
+                }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            if (data.new_video_url) {
+                setCurrentVideoUrl(getApiUrl(data.new_video_url));
+                setServerVideoFile(data.new_video_url.split('/').pop());
+                setBurnedLogo(data.burned_logo ?? null);
+                if (videoRef.current) videoRef.current.load();
+                setShowLogoModal(false);
+            }
+        } catch (e) {
+            setEditError(e.message);
+            setTimeout(() => setEditError(null), 5000);
+        } finally {
+            setIsLogoing(false);
+        }
+    };
+
+    // Strip burned logo off server file.
+    const handleRemoveLogo = async () => {
+        setIsLogoing(true);
+        setEditError(null);
+        try {
+            const res = await apiFetch('/api/logo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    clip_index: index,
+                    remove: true,
+                    input_filename: serverVideoFile,
+                }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            if (data.new_video_url) {
+                setCurrentVideoUrl(getApiUrl(data.new_video_url));
+                setServerVideoFile(data.new_video_url.split('/').pop());
+                setBurnedLogo(null);
+                if (videoRef.current) videoRef.current.load();
+                setShowLogoModal(false);
+            }
+        } catch (e) {
+            setEditError(e.message);
+            setTimeout(() => setEditError(null), 5000);
+        } finally {
+            setIsLogoing(false);
         }
     };
 
@@ -1096,6 +1176,15 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     </button>
 
                     <button
+                        onClick={() => setShowLogoModal(true)}
+                        disabled={isLogoing}
+                        className={QUIET_BTN}
+                    >
+                        {isLogoing ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Crosshair size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
+                        {isLogoing ? 'adding…' : 'logo'}
+                    </button>
+
+                    <button
                         onClick={() => setShowModal(true)}
                         className="btn-primary flex-col gap-1 py-2.5 sm:py-2 px-1 text-[11px] leading-none rounded-input whitespace-nowrap"
                     >
@@ -1365,6 +1454,19 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 isProcessing={isOverlaying}
                 videoUrl={currentVideoUrl}
                 burnedOverlay={burnedOverlay}
+            />
+
+            <LogoModal
+                isOpen={showLogoModal}
+                onClose={() => setShowLogoModal(false)}
+                onGenerate={handleLogo}
+                onRemove={burnedLogo ? handleRemoveLogo : null}
+                isProcessing={isLogoing}
+                videoUrl={currentVideoUrl}
+                existingSubtitles={activeLayers.subtitles}
+                hasCaptions={!!activeLayers.subtitles || /(^|_)subtitled_/.test(serverVideoFile || '')}
+                serverRender={hasServerBurns}
+                burnedLogo={burnedLogo}
             />
 
             <TranslateModal
