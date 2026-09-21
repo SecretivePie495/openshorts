@@ -135,7 +135,9 @@ def _post_slot(target, clip, file_ref, caption):
             "POSTIZ_YT_VISIBILITY", "public"))
         settings.setdefault("selfDeclaredMadeForKids", "no")
     elif ttype in ("instagram", "instagram-standalone"):
-        settings.setdefault("post_type", "reels")
+        # Standalone channels validate post_type as post|story only; videos
+        # are published as Reels automatically when media is a video.
+        settings.setdefault("post_type", "post")
     slot = {
         "integration": {"id": target["integration"]},
         "value": [{"content": caption, "image": [file_ref]}],
