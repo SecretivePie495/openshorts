@@ -27,6 +27,36 @@ import time
 
 import httpx
 
+# Postiz provider type -> the platform name OpenShorts' post modal uses.
+PLATFORM_OF_TYPE = {
+    "instagram": "instagram",
+    "instagram-standalone": "instagram",
+    "youtube": "youtube",
+    "tiktok": "tiktok",
+}
+
+
+def _target_type(target):
+    return target.get("__type") or (target.get("settings") or {}).get("__type")
+
+
+def configured() -> bool:
+    return _config() is not None
+
+
+def platforms() -> list:
+    """Platform names (tiktok/instagram/youtube) the configured targets can
+    receive, for the dashboard to gate its post modal."""
+    cfg = _config()
+    if not cfg:
+        return []
+    out = []
+    for t in cfg[2]:
+        p = PLATFORM_OF_TYPE.get(_target_type(t))
+        if p and p not in out:
+            out.append(p)
+    return out
+
 
 def enabled() -> bool:
     return os.environ.get("POSTIZ_AUTO_PUBLISH", "").strip() == "1"
@@ -115,6 +145,53 @@ def _post_slot(target, clip, file_ref, caption):
     if settings:
         slot["settings"] = settings
     return slot
+
+
+def push_single(file_path, clip, platforms=None, title=None,
+                description=None, scheduled_date=None):
+    """One-clip, user-triggered push (the dashboard "post" button). Raises on
+    failure so the API endpoint can surface the error."""
+    cfg = _config()
+    if not cfg:
+        raise RuntimeError("Postiz not configured (POSTIZ_URL/POSTIZ_API_KEY/"
+                           "POSTIZ_TARGETS)")
+    url, key, targets, post_type, lead_minutes = cfg
+    if platforms:
+        wanted = set(platforms)
+        targets = [t for t in targets
+                   if PLATFORM_OF_TYPE.get(_target_type(t)) in wanted]
+        if not targets:
+            raise RuntimeError(
+                f"No Postiz channel configured for: {', '.join(sorted(wanted))}")
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        raise RuntimeError("Clip file not found or empty")
+    caption = (description or "").strip() or _caption_for(clip, None)
+    if scheduled_date:
+        date, kind = scheduled_date, "schedule"
+    elif post_type == "schedule":
+        date, kind = time.strftime(
+            "%Y-%m-%dT%H:%M:%S.000Z",
+            time.gmtime(time.time() + lead_minutes * 60)), "schedule"
+    else:
+        date, kind = time.strftime("%Y-%m-%dT%H:%M:%S.000Z",
+                                   time.gmtime()), post_type
+    file_ref = _upload_video(url, key, file_path)
+    slot_clip = dict(clip, video_title_for_youtube_short=title) if title else clip
+    payload = {
+        "type": kind,
+        "date": date,
+        "shortLink": False,
+        "tags": [],
+        "posts": [_post_slot(t, slot_clip, file_ref, caption)
+                  for t in targets],
+    }
+    resp = _request("POST", f"{url}/api/public/v1/posts", key, json=payload)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Postiz rejected the post "
+                           f"({resp.status_code}): {resp.text[:300]}")
+    body = resp.json()
+    return {"platform": "postiz", "mode": kind,
+            "ids": body.get("postIds") or body.get("ids") or []}
 
 
 def push_clips(output_dir, shorts, clips_data):

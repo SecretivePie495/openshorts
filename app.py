@@ -1,5 +1,6 @@
 import os
 import llm_backend
+import postiz_push
 import re
 import sys
 import uuid
@@ -2066,6 +2067,10 @@ async def get_config():
         # Self-host only: tells the dashboard the Gemini key is optional
         # because the moment picker runs on an OpenAI-compatible server.
         "localLlm": None if BILLING_ENABLED else llm_backend.describe(),
+        # When Postiz is wired, the dashboard's post button routes there and
+        # its platform picker uses Postiz' connected channels.
+        "postiz": ({"enabled": True, "platforms": postiz_push.platforms()}
+                   if postiz_push.configured() else None),
     }
 
 async def _probe_youtube_quality(url: str) -> dict:
@@ -5164,17 +5169,38 @@ async def post_to_socials(req: SocialPostRequest, request: Request):
     if req.job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    job = jobs[req.job_id]
+    await _assert_job_owner(request, job)
+    if 'result' not in job or 'clips' not in job['result']:
+        raise HTTPException(status_code=400, detail="Job result not available")
+
+    if postiz_push.configured():
+        # Postiz is wired: the "post" button sends the clip to the self-hosted
+        # scheduler instead of Upload-Post. Draft/schedule per POSTIZ_POST_TYPE.
+        try:
+            clip = job['result']['clips'][req.clip_index]
+        except (IndexError, KeyError):
+            raise HTTPException(status_code=404, detail="Clip not found")
+        filename = clip['video_url'].split('/')[-1]
+        file_path = os.path.join(OUTPUT_DIR, req.job_id, filename)
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(
+                None,
+                lambda: postiz_push.push_single(
+                    file_path, clip, platforms=req.platforms,
+                    title=req.title, description=req.description,
+                    scheduled_date=req.scheduled_date))
+        except Exception as e:
+            print(f"❌ Postiz push failed: {e}")
+            raise HTTPException(status_code=502, detail=f"Postiz: {e}")
+
     # Resolve the Upload-Post key + profile. For managed users the server key is
     # used and their own profile is forced (body api_key / user_id are ignored).
     upload_key, forced_profile = await resolve_upload_post(request, req.api_key)
     if not upload_key:
         raise HTTPException(status_code=400, detail="Missing Upload-Post API key")
     post_user = resolve_post_profile(forced_profile, req.user_id)
-
-    job = jobs[req.job_id]
-    await _assert_job_owner(request, job)
-    if 'result' not in job or 'clips' not in job['result']:
-        raise HTTPException(status_code=400, detail="Job result not available")
 
     try:
         clip = job['result']['clips'][req.clip_index]

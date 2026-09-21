@@ -30,6 +30,24 @@ const PLATFORM_OPTIONS = [
     { value: 'youtube', label: 'youtube', icon: <Youtube size={16} /> },
 ];
 
+// Self-hosted Postiz wiring (POSTIZ_* env on the backend). Fetched once;
+// when present, the post button sends clips to Postiz instead of Upload-Post.
+let postizInfo; // undefined = not fetched, null = not configured
+let postizPromise = null;
+const getPostizInfo = () => {
+    if (postizInfo !== undefined) return Promise.resolve(postizInfo);
+    if (!postizPromise) {
+        postizPromise = apiFetch('/api/config')
+            .then(r => (r.ok ? r.json() : null))
+            .then(d => {
+                postizInfo = d?.postiz?.enabled ? d.postiz : null;
+                return postizInfo;
+            })
+            .catch(() => { postizInfo = null; return null; });
+    }
+    return postizPromise;
+};
+
 function clipDurationSeconds(clip) {
     // A recut clip's start/end are the covering source range (segments may be
     // non-contiguous or reordered); its real duration is the segment sum.
@@ -266,10 +284,14 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
 
     // Which platforms the selected profile actually has linked. `null` means
     // unknown (profile list not loaded) — in that case nothing is gated.
-    const knownConnections = Array.isArray(connectedPlatforms);
-    const noAccountsConnected = knownConnections && connectedPlatforms.length === 0;
+    // When Postiz is wired, its connected channels take over the gating.
+    const [postiz, setPostiz] = useState(null);
+    useEffect(() => { let live = true; getPostizInfo().then(p => { if (live) setPostiz(p); }); return () => { live = false; }; }, []);
+    const effConnected = postiz ? postiz.platforms : connectedPlatforms;
+    const knownConnections = Array.isArray(effConnected);
+    const noAccountsConnected = knownConnections && effConnected.length === 0;
     const platformOptions = knownConnections
-        ? PLATFORM_OPTIONS.map((o) => (connectedPlatforms.includes(o.value) ? o : { ...o, disabled: true, hint: 'not connected' }))
+        ? PLATFORM_OPTIONS.map((o) => (effConnected.includes(o.value) ? o : { ...o, disabled: true, hint: 'not connected' }))
         : PLATFORM_OPTIONS;
 
     const handleConnectAccounts = () => {
@@ -286,12 +308,12 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setIsScheduling(false);
             setScheduleDate("");
             setPostResult(null);
-            // Only preselect platforms the profile can actually publish to.
+            // Only preselect platforms the profile (or Postiz) can publish to.
             if (knownConnections) {
                 setPlatforms({
-                    tiktok: connectedPlatforms.includes('tiktok'),
-                    instagram: connectedPlatforms.includes('instagram'),
-                    youtube: connectedPlatforms.includes('youtube'),
+                    tiktok: effConnected.includes('tiktok'),
+                    instagram: effConnected.includes('instagram'),
+                    youtube: effConnected.includes('youtube'),
                 });
             }
         }
@@ -745,7 +767,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     };
 
     // Managed (cloud plan/trial) users post with the server-side key — no BYOK needed
-    const canPost = isManaged || (uploadPostKey && uploadUserId);
+    const canPost = isManaged || (uploadPostKey && uploadUserId) || !!postiz;
 
     const handlePost = async () => {
         if (!canPost) {
@@ -806,7 +828,17 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 }
             }
 
-            setPostResult({ success: true, msg: isScheduling ? "Scheduled successfully!" : "Posted successfully!" });
+            const sent = await res.json().catch(() => null);
+            if (sent?.platform === 'postiz') {
+                setPostResult({
+                    success: true,
+                    msg: isScheduling
+                        ? 'Scheduled in Postiz ✓'
+                        : 'Sent to Postiz ✓ — in your Postiz calendar',
+                });
+            } else {
+                setPostResult({ success: true, msg: isScheduling ? "Scheduled successfully!" : "Posted successfully!" });
+            }
             setTimeout(() => {
                 setShowModal(false);
                 setPostResult(null);
