@@ -471,7 +471,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     // 1920px-tall canvas. Uncalibrated, the same slider value rendered ~2.6x
                     // bigger here than in the preview. Convert to the equivalent size so this
                     // fallback path matches what was actually previewed.
-                    font_size: options.fontSize * (2.2 * 288 / 1920 / 0.85),
+                    font_size: Math.round(options.fontSize * (2.2 * 288 / 1920 / 0.85)),
                     margin_v: options.marginV,
                     font_name: options.fontName,
                     font_color: options.fontColor,
