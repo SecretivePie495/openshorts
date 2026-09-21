@@ -331,9 +331,13 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         return False
 
     # Match the SRT burn path: PlayResY 288 keeps font sizes consistent.
-    final_fontsize = int(_clamp_number(fontsize, 10, 200, 16) * 0.85)
-    if final_fontsize < 10:
-        final_fontsize = 10
+    # Floor of 3 (not 10): the subtitle modal pre-converts its 12-48 slider into
+    # this scale (~4.7-18.6 here) so preview and burn match pixel-for-pixel; a
+    # floor of 10 silently clamped every slider value below ~26 to the same
+    # size, making "Small" render bigger than the preview showed.
+    final_fontsize = int(_clamp_number(fontsize, 3, 200, 16) * 0.85)
+    if final_fontsize < 3:
+        final_fontsize = 3
 
     align_map = {'top': 8, 'middle': 5, 'bottom': 2}
     ass_alignment = align_map.get(str(alignment).lower(), 2)
@@ -512,9 +516,13 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
 
     # Font size scaling for ASS virtual resolution (PlayResY=288 default)
     # For vertical 1080x1920 video, we need larger text for readability
-    final_fontsize = int(_clamp_number(fontsize, 10, 200, 16) * 0.85)
-    if final_fontsize < 10:
-        final_fontsize = 10
+    # Floor of 3 (not 10): the subtitle modal pre-converts its 12-48 slider into
+    # this scale (~4.7-18.6 here) so preview and burn match pixel-for-pixel; a
+    # floor of 10 silently clamped every slider value below ~26 to the same
+    # size, making "Small" render bigger than the preview showed.
+    final_fontsize = int(_clamp_number(fontsize, 3, 200, 16) * 0.85)
+    if final_fontsize < 3:
+        final_fontsize = 3
 
     safe_font_name = _sanitize_font_name(font_name)
     ass_bold = 1 if safe_font_name in BASE_FONTS_WITH_BOLD else 0
