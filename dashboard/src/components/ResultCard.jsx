@@ -195,11 +195,34 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     useEffect(() => {
         const serverUrl = getApiUrl(clip.video_url);
         const serverName = (clip.video_url || '').split('/').pop();
-        if (serverName && serverName !== serverVideoFile) {
-            setServerVideoFile(serverName);
+        if (!serverName || serverName === serverVideoFile) return;
+        setServerVideoFile(serverName);
+        setDurableFailed(false);
+        setHasPlayed(false);
+
+        // A hook/subtitle can exist only as a local Remotion preview (never
+        // burned server-side). Blindly adopting the refreshed server file
+        // here would silently drop it — e.g. bulk-subtitling every clip
+        // re-polls this clip's video_url too, wiping a hook that was only
+        // ever previewed in-browser. Recomposite any still-unbaked layer on
+        // top of the fresh file instead of discarding it.
+        const stillUnbaked = (activeLayers.hook && !/^hooked?_/.test(serverName))
+            || (activeLayers.subtitles && !/^subtitled_/.test(serverName));
+
+        if (stillUnbaked) {
+            renderInBrowser({
+                videoUrl: originalVideoUrl,
+                durationInSeconds: clipDuration,
+                subtitles: activeLayers.subtitles,
+                hook: activeLayers.hook,
+                effects: activeLayers.effects,
+                logo: activeLayers.logo,
+            }).then((blobUrl) => {
+                setCurrentVideoUrl(blobUrl);
+                if (videoRef.current) videoRef.current.load();
+            });
+        } else {
             setCurrentVideoUrl(serverUrl);
-            setDurableFailed(false);
-            setHasPlayed(false);
             if (videoRef.current) videoRef.current.load();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
