@@ -5485,6 +5485,8 @@ async def get_social_user(request: Request):
             return {"profiles": profiles_list}
             
             
+        except HTTPException:
+             raise
         except Exception as e:
              raise HTTPException(status_code=500, detail=str(e))
 
