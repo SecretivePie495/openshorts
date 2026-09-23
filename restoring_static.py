@@ -50,6 +50,15 @@ class RestoringStaticFiles(StaticFiles):
         self.guard = guard
 
     async def get_response(self, path: str, scope):
+        response = await self._get_response(path, scope)
+        # CORS headers only appear when the request carries an Origin, so
+        # without Vary the browser caches a clip card's plain <video> fetch and
+        # replays it to the Remotion preview's CORS fetch, which then fails and
+        # falls back to a <video> that drifts from the captions.
+        response.headers["Vary"] = "Origin"
+        return response
+
+    async def _get_response(self, path: str, scope):
         # Before the filesystem: a refused path must look exactly like a
         # missing one, or the 404-vs-403 difference confirms the file is there.
         if self.guard is not None and not self.guard(path):

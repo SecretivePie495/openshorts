@@ -93,3 +93,16 @@ def test_app_job_id_guard():
     assert app_mod._JOB_ID_RE.match(JOB)
     for bad in ("thumbnails", "..", "cff3ad6c", "CFF3AD6C-C1E6-48E8-9A75-BE74F39779C5"):
         assert not app_mod._JOB_ID_RE.match(bad)
+
+
+def test_responses_vary_on_origin(tmp_path):
+    # A cached no-Origin response replayed to a CORS fetch breaks the
+    # Remotion preview; Vary keeps the two cache entries apart.
+    async def restorer(job_id):
+        return False
+
+    client, root = _app(tmp_path, restorer)
+    os.makedirs(root / JOB)
+    (root / JOB / "clip_1.mp4").write_bytes(b"x" * 100)
+    r = client.get(f"/videos/{JOB}/clip_1.mp4", headers={"Range": "bytes=0-9"})
+    assert r.status_code == 206 and r.headers["vary"] == "Origin"
