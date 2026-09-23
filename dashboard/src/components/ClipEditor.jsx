@@ -1,6 +1,7 @@
 import React, { useMemo, useCallback } from 'react';
 import useEditorEngine from './editor/useEditorEngine';
 import TopBar from './editor/TopBar';
+import Timeline from './editor/Timeline';
 import LeftNav from './editor/LeftNav';
 import SourceMonitor from './editor/SourceMonitor';
 import TranscriptPanel from './editor/TranscriptPanel';
@@ -185,10 +186,9 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
 
                 {/* Column 2: Program preview (center stage) */}
                 <div className="flex-1 min-w-0 flex flex-col min-h-0">
-                    <div className="flex-1 min-h-0 p-4 overflow-y-auto">
+                    <div className="flex-1 min-h-0 p-4 flex flex-col">
                         <OutputPreview
                             videoRef={videoRef}
-                            clipTrackRef={clipTrackRef}
                             previewUrl={previewUrl}
                             playhead={playhead}
                             setPlayhead={setPlayhead}
@@ -260,6 +260,25 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     </div>
                 </div>
             </div>
+
+            {/* Bottom timeline (full width) */}
+            <Timeline
+                clipTrackRef={clipTrackRef}
+                segments={segments}
+                words={words}
+                coverage={coverage}
+                clipTrackSeconds={clipTrackSeconds}
+                playhead={playhead}
+                selected={selected}
+                dispatch={dispatch}
+                startClipScrub={startClipScrub}
+                startTrimDrag={startTrimDrag}
+                splitSegment={splitSegment}
+                deleteSegment={deleteSegment}
+                rendering={rendering}
+                dirty={dirty}
+                fmt={fmt}
+            />
 
             {/* Effects panel overlay */}
             {showEffects && (
