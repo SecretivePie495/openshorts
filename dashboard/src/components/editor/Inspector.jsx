@@ -226,7 +226,7 @@ export default function Inspector({
                             : `more than ${limits?.max_segments} segments`}
                     </p>
                 )}
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 whitespace-nowrap">
                     <button
                         className="btn-ghost"
                         onClick={onClose}
@@ -243,7 +243,7 @@ export default function Inspector({
                             : 're-render clip'}
                     </button>
                     <button
-                        className="btn-primary flex items-center justify-center gap-2 bg-brass/20 hover:bg-brass/30 disabled:opacity-40"
+                        className="btn-primary flex-1 flex items-center justify-center gap-2 bg-brass/20 hover:bg-brass/30 disabled:opacity-40"
                         disabled={!canRender || rendering}
                         onClick={() => setShowEffects(true)}
                         title="Apply all effects (LUT, transitions, b-roll, audio, text)"
