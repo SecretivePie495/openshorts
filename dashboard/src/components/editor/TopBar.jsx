@@ -1,5 +1,5 @@
 import React from 'react';
-import { Film, PanelLeftClose, X } from 'lucide-react';
+import { Film, PanelLeft, PanelLeftClose, X } from 'lucide-react';
 
 export default function TopBar({
     clipIndex, clipTitle, total, fmt,

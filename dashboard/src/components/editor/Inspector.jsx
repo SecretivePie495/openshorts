@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, Plus, Redo2, Scissors, Sparkles, Trash2, Undo2 } from 'lucide-react';
 
 // Contextual inspector — segments, framing, toggles, keyboard legend.
 export default function Inspector({
