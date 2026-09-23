@@ -792,19 +792,11 @@ def download_youtube_video(url, output_dir="."):
     hd_args = hd_extractor_args(_bgutil_http, _bgutil_script)
     fallback_args = fallback_extractor_args(_bgutil_http, _bgutil_script)
 
-    # Cap at 720p ONLY when the bytes actually go through the PER-GB paid proxy
-    # — that cap exists to control bandwidth cost, and the direct attempt and
-    # the flat-rate static proxies have none.
-    #
-    # This is per-attempt on purpose. Deciding it once from `_proxy` capped the
-    # DIRECT attempt too, so with DIRECT_FIRST=1 (which serves most downloads)
-    # every YouTube source arrived at 720p and, since the reframe inherits the
-    # source height, 80% of delivered clips came out 406x720 (audited 25-jul-2026).
-    def _hd_fmt_for(capped):
-        if capped:
-            return ('bestvideo[vcodec^=avc1][height<=720][ext=mp4]+bestaudio[ext=m4a]/'
-                    'bestvideo[vcodec^=avc1][height<=720]+bestaudio/'
-                    'best[height<=720][ext=mp4]/best[height<=720]/best')
+    # Always request up to 1080p. The per-GB cost cap (720p limit) only applies
+    # when bytes actually flow through the paid proxy — you have no PROXY_URL set
+    # so there is no cost to lift this entirely. yt-dlp picks the best available
+    # stream; QUALITY_GATE_MIN_HEIGHT filters out sources that can't reach 1080p.
+    def _fmt():
         return ('bestvideo[vcodec^=avc1][height<=1080][ext=mp4]+bestaudio[ext=m4a]/'
                 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/'
                 'best[height<=1080][ext=mp4]/best[ext=mp4]/best')
@@ -882,7 +874,7 @@ def download_youtube_video(url, output_dir="."):
     attempts = [
         (label,
          fallback_args if label.startswith('fallback') else hd_args,
-         _hd_fmt_for(capped),
+         _fmt(),
          proxy,
          False)
         for label, capped, proxy in plan_download_attempts(
@@ -899,7 +891,7 @@ def download_youtube_video(url, output_dir="."):
         # proxy configured both sides are None, and None == None capped the
         # direct cookies download to 720p.
         attempts.append(('cookies', _ck_args,
-                         _hd_fmt_for(_ck_proxy is not None and _ck_proxy == _proxy),
+                         _fmt(),
                          _ck_proxy, True))
     if not is_youtube_url(url):
         print("🌐 Direct file URL: downloading from the server's own IP (no proxy).")

@@ -66,7 +66,7 @@ OUTPUT_MAX_GB = int(os.environ.get("OUTPUT_MAX_GB", "25"))
 UPLOADS_MAX_GB = int(os.environ.get("UPLOADS_MAX_GB", "15"))
 # Pre-flight quality gate: warn before processing a YouTube source below this
 # height (0 disables). Only applies to URLs; uploads are whatever the user gave.
-QUALITY_GATE_MIN_HEIGHT = int(os.environ.get("QUALITY_GATE_MIN_HEIGHT", "720"))
+QUALITY_GATE_MIN_HEIGHT = int(os.environ.get("QUALITY_GATE_MIN_HEIGHT", "1080"))
 # Reject sources shorter than this before starting (0 disables). A 24s YouTube
 # Short cannot yield 15-60s clips: Gemini returns nothing, the job burns
 # managed minutes and dies with "no usable clips" (prod 20-ago: 3 of 5 recent
