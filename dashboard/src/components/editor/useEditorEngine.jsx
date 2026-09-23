@@ -544,23 +544,6 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     }, [clampToCovered, spanIndexAt]);
 
     // ---- playback loop -----------------------------------------------------
-    const playRafRef = useRef(0);
-    const stopPlayLoop = useCallback(() => {
-        if (playRafRef.current) cancelAnimationFrame(playRafRef.current);
-        playRafRef.current = 0;
-    }, []);
-    const startPlayLoop = useCallback(() => {
-        stopPlayLoop();
-        const tick = () => {
-            const v = videoRef.current;
-            if (!v || v.paused || v.ended) { playRafRef.current = 0; return; }
-            stepPlayback(v);
-            playRafRef.current = requestAnimationFrame(tick);
-        };
-        playRafRef.current = requestAnimationFrame(tick);
-    }, [stepPlayback, stopPlayLoop]);
-    useEffect(() => stopPlayLoop, [stopPlayLoop]);
-
     const stepPlayback = useCallback((v) => {
         if (dragRef.current?.kind === 'scrub') return;
         if (!dirty) { setPlayhead(v.currentTime); return; }
@@ -588,6 +571,23 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
         setPlayhead(next.start);
         try { v.currentTime = next.rendered; } catch { /* not seekable yet */ }
     }, [coverage, dirty, segments]);
+
+    const playRafRef = useRef(0);
+    const stopPlayLoop = useCallback(() => {
+        if (playRafRef.current) cancelAnimationFrame(playRafRef.current);
+        playRafRef.current = 0;
+    }, []);
+    const startPlayLoop = useCallback(() => {
+        stopPlayLoop();
+        const tick = () => {
+            const v = videoRef.current;
+            if (!v || v.paused || v.ended) { playRafRef.current = 0; return; }
+            stepPlayback(v);
+            playRafRef.current = requestAnimationFrame(tick);
+        };
+        playRafRef.current = requestAnimationFrame(tick);
+    }, [stepPlayback, stopPlayLoop]);
+    useEffect(() => stopPlayLoop, [stopPlayLoop]);
 
     const onClipTimeUpdate = useCallback((e) => stepPlayback(e.target), [stepPlayback]);
 
