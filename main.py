@@ -895,7 +895,11 @@ def download_youtube_video(url, output_dir="."):
     if cookies_path and attempts:
         _ck_proxy = _statics[0] if _statics else (None if hd_args else _proxy)
         _ck_args = hd_args if hd_args else fallback_args
-        attempts.append(('cookies', _ck_args, _hd_fmt_for(_ck_proxy == _proxy),
+        # Capped only when this attempt really rides the per-GB proxy: with no
+        # proxy configured both sides are None, and None == None capped the
+        # direct cookies download to 720p.
+        attempts.append(('cookies', _ck_args,
+                         _hd_fmt_for(_ck_proxy is not None and _ck_proxy == _proxy),
                          _ck_proxy, True))
     if not is_youtube_url(url):
         print("🌐 Direct file URL: downloading from the server's own IP (no proxy).")
