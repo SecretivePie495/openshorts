@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronsRight, ChevronsLeft, X } from 'lucide-react';
+import { getApiUrl } from '../../config';
 
 // Source monitor with its track and three-point IN/OUT cluster.
 // Reuses existing refs and handlers wholesale from the engine.
@@ -14,7 +15,7 @@ export default function SourceMonitor({
     sourceDuration, sourceAvailable, canonical,
     markRange, clearMarks, sendToClip, minSeg, selected,
     startTrimDrag, startGhostDrag,
-    fmt, edges,
+    fmt, edl, segments,
     sourceTrackRef,
     showSourceButton: showSourceButton,
     onToggleSource,
@@ -31,7 +32,7 @@ export default function SourceMonitor({
     return (
         <div className="flex flex-col min-h-0 gap-2">
             <div className="flex items-center justify-between shrink-0">
-                <p className="eyebrow">Source · {fmt(sourceDuration)}{edges.duration_estimated ? ' (EST.)' : ''}{!sourceAvailable ? ' · EXPIRED' : ''}</p>
+                <p className="eyebrow">Source · {fmt(sourceDuration)}{edl.source.duration_estimated ? ' (EST.)' : ''}{!sourceAvailable ? ' · EXPIRED' : ''}</p>
                 <div className="flex items-center gap-1">
                     <span className="readout hidden sm:inline">
                         DRAG EMPTY SPACE = ADD OR REPLACE · BLOCK TO MOVE · EDGES TO TRIM
@@ -51,7 +52,7 @@ export default function SourceMonitor({
             <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center bg-black rounded-card border border-rule overflow-hidden">
                 <video
                     ref={sourceRef}
-                    src={edges.source?.url ? `/videos/${edges.job_id}/${edges.source.url}` : undefined}
+                    src={getApiUrl(edl.source.url)}
                     controls
                     playsInline
                     preload="metadata"
@@ -82,7 +83,7 @@ export default function SourceMonitor({
                     )}
 
                     {/* segments as blocks */}
-                    {sourceDuration > 0 && edges.segments.map((seg, i) => (
+                    {sourceDuration > 0 && segments.map((seg, i) => (
                         <div
                             key={i}
                             onPointerDown={(e) => startTrimDrag(e, i, 'move', sourceTrackRef.current, sourceDuration)}

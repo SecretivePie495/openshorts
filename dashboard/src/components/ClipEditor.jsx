@@ -46,7 +46,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         markHere, clearMarks, sendToClip,
         scrollTranscriptTo, pickWord,
         onClipTimeUpdate, onClipSeeked, startClipScrub,
-        onClipPlay, onStopPlayback, onVideoLoadedMetadata, onEffectsChange,        fmt, edges,
+        onClipPlay, onStopPlayback, onVideoLoadedMetadata, onEffectsChange,        fmt, edl,
     } = engine;
 
     // Recompute on each edit so the top-bar always shows a fresh duration.
@@ -145,7 +145,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             startTrimDrag={startTrimDrag}
                             startGhostDrag={startGhostDrag}
                             fmt={fmt}
-                            edges={edges}
+                            edl={edl}
+                            segments={segments}
                             sourceTrackRef={sourceTrackRef}
                             showSourceButton={true}
                             onToggleSource={() => setShowSource(v => !v)}
@@ -177,6 +178,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     <div className="flex-1 min-h-0 p-4 overflow-y-auto">
                         <OutputPreview
                             videoRef={videoRef}
+                            clipTrackRef={clipTrackRef}
                             previewUrl={previewUrl}
                             playhead={playhead}
                             setPlayhead={setPlayhead}

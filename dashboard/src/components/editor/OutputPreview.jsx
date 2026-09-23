@@ -14,6 +14,7 @@ const SEGMENT_COLORS = [
 
 export default function OutputPreview({
     videoRef,
+    clipTrackRef,
     previewUrl,
     playhead,
     setPlayhead,

@@ -892,7 +892,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
         markHere, clearMarks, sendToClip,
         scrollTranscriptTo, pickWord,
         onClipTimeUpdate, onClipSeeked, startClipScrub,
-        onClipPlay, onStopPlayback,
+        onClipPlay, onStopPlayback: stopPlayLoop,
         onVideoLoadedMetadata: useCallback((e) => {
             const v = e.target;
             if (playhead > 0) v.currentTime = playhead;
