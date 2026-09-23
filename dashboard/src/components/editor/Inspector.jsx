@@ -13,7 +13,7 @@ export default function Inspector({
     renderError, overCaps,
     fmt, minSeg, total, dirty,
     showEffects, setShowEffects,
-    limits,
+    limits, onClose,
 }) {
     return (
         <div className="flex flex-col min-h-0 w-full xl:w-[22rem] 2xl:w-[26rem] shrink-0">
@@ -229,10 +229,7 @@ export default function Inspector({
                 <div className="flex gap-2">
                     <button
                         className="btn-ghost"
-                        onClick={() => {
-                            if (rendering) return;
-                            // dirty is handled via onDone / confirm-close in parent
-                        }}
+                        onClick={onClose}
                     >
                         {rendering ? 'close' : dirty ? 'cancel' : 'close'}
                     </button>

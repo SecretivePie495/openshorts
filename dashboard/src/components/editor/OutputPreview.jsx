@@ -1,41 +1,11 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 
 // 9:16 output preview. The clip track lives in the bottom Timeline.
-// Uses existing refs (videoRef, clipTrackRef) and handlers from the engine.
+// Uses the engine's videoRef and playback handlers.
 
 export default function OutputPreview({
-    videoRef,
-    clipTrackRef,
-    previewUrl,
-    playhead,
-    setPlayhead,
-    renderedSegments,
-    segments,
-    coverage,
-    clipTrackSeconds,
-    onClipTimeUpdate,
-    onClipSeeked,
-    startClipScrub,
-    dispatch,
-    startTrimDrag,
-    fmt,
-    total,
-    dirty,
-    missingSeconds,
-    rendering,
-    canRender,
-    doRender,
-    selected,
-    showEffects,
-    setShowEffects,
-    renderError,
-    overCaps,
-    needsSourcePath,
-    renderSeconds,
-    limits,
-    onClipPlay,
-    onStopPlayback,
+    videoRef, previewUrl, fmt, dirty, missingSeconds, rendering,
+    onClipTimeUpdate, onClipSeeked, onClipPlay, onStopPlayback,
 }) {
 
     return (

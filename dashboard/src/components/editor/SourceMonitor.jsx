@@ -6,7 +6,7 @@ import { getApiUrl } from '../../config';
 // Reuses existing refs and handlers wholesale from the engine.
 export default function SourceMonitor({
     showSource, setShowSource,
-    sourceRef, seekSource,
+    sourceRef, seekSource, applySeek, markHere,
     sourceTime, setSourceTime,
     markIn, setMarkIn, markOut, setMarkOut,
     ghost, setGhost,
@@ -15,19 +15,12 @@ export default function SourceMonitor({
     sourceDuration, sourceAvailable, canonical,
     markRange, clearMarks, sendToClip, minSeg, selected,
     startTrimDrag, startGhostDrag,
-    fmt, edl, segments,
+    fmt, edl, segments, maxSegments,
     sourceTrackRef,
     showSourceButton: showSourceButton,
     onToggleSource,
 }) {
     if (!showSource || !sourceAvailable) return null;
-
-    const handleMarkHere = (which) => {
-        const v = sourceRef.current;
-        if (!v || !Number.isFinite(v.currentTime)) return;
-        const round3 = (t) => Math.round(t * 1000) / 1000;
-        (which === 'in' ? setMarkIn : setMarkOut)(round3(v.currentTime));
-    };
 
     return (
         <div className="flex flex-col min-h-0 gap-2">
@@ -56,6 +49,7 @@ export default function SourceMonitor({
                     controls
                     playsInline
                     preload="metadata"
+                    onLoadedMetadata={applySeek}
                     onTimeUpdate={(e) => setSourceTime(e.target.currentTime)}
                     className="h-full w-auto max-w-full max-h-full"
                 />
@@ -160,6 +154,48 @@ export default function SourceMonitor({
                 {paintNote && (
                     <p className="text-warn mt-1 leading-relaxed text-xs">{paintNote}</p>
                 )}
+            </div>
+
+            {/* Three-point edit: mark a range on the source, then send it to the clip. */}
+            <div className="shrink-0 rounded-input border border-rule bg-paper2 p-2 flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                    <button onClick={() => markHere('in')} className="btn-quiet text-[11px] py-1 px-2 flex items-center gap-1 shrink-0">
+                        <ChevronsRight size={12} /> in <span className="text-muted">i</span>
+                    </button>
+                    <button onClick={() => markHere('out')} className="btn-quiet text-[11px] py-1 px-2 flex items-center gap-1 shrink-0">
+                        <ChevronsLeft size={12} /> out <span className="text-muted">o</span>
+                    </button>
+                    <p className={`readout px-1 truncate ${markRange ? 'text-ink' : ''}`}>
+                        {markIn === null ? '—:——' : fmt(markIn)}{' → '}{markOut === null ? '—:——' : fmt(markOut)}
+                        {markIn !== null && markOut !== null && !markRange && ` · UNDER ${minSeg}S`}
+                    </p>
+                    <button
+                        onClick={clearMarks}
+                        disabled={markIn === null && markOut === null}
+                        className="ml-auto p-1 rounded-input text-muted hover:text-ink hover:bg-paper3 disabled:opacity-40 shrink-0"
+                        aria-label="clear in and out marks"
+                    >
+                        <X size={13} />
+                    </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <button
+                        onClick={() => sendToClip('replace')}
+                        disabled={!markRange}
+                        title="the selected segment becomes this range (.)"
+                        className="btn-primary text-[11px] py-1.5 px-2 disabled:opacity-40"
+                    >
+                        replace #{selected + 1}
+                    </button>
+                    <button
+                        onClick={() => sendToClip('insert')}
+                        disabled={!markRange || segments.length >= maxSegments}
+                        title="add this range as a new segment after the selected one (,)"
+                        className="btn-quiet text-[11px] py-1.5 px-2 disabled:opacity-40"
+                    >
+                        insert after #{selected + 1}
+                    </button>
+                </div>
             </div>
         </div>
     );

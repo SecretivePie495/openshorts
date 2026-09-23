@@ -1,4 +1,5 @@
-import React, { useMemo, useCallback } from 'react';
+import React from 'react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import useEditorEngine from './editor/useEditorEngine';
 import TopBar from './editor/TopBar';
 import Timeline from './editor/Timeline';
@@ -22,14 +23,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         segments, selected, dispatch,
         snapToWords, setSnapToWords,
         reapplyCaptions, setReapplyCaptions,
-        framing, setFraming, renderedFraming, setRenderedFraming,
-        renderedSegments, setRenderedSegments,
+        framing, setFraming, renderedFraming,
         previewUrl,
         rendering, renderSeconds, renderError,
         confirmClose, setConfirmClose,
-        showEffects, setShowEffects, effectsState, setEffectsState,
-        selectedWord, setSelectedWord,
-        playhead, setPlayhead,
+        showEffects, setShowEffects,
+        selectedWord,
+        playhead,
         showSource, setShowSource,
         sourceTime, setSourceTime,
         markIn, setMarkIn, markOut, setMarkOut,
@@ -37,7 +37,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         // Computed
         words, sourceAvailable, sourceDuration, canonical, minSeg, total,
         sourceOpen, limits, dirty, outOfRange, needsSourcePath,
-        invalidSegments, overCaps, canRender,
+        overCaps, canRender,
         missingSeconds, coverage, clipTrackSeconds,
         markRange,
         // Actions
@@ -47,39 +47,12 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         markHere, clearMarks, sendToClip,
         scrollTranscriptTo, pickWord,
         onClipTimeUpdate, onClipSeeked, startClipScrub,
-        onClipPlay, onStopPlayback, onVideoLoadedMetadata, onEffectsChange,        fmt, edl,
+        onClipPlay, onStopPlayback, onEffectsChange, fmt, edl,
+        loadError, setReload, applySeek,
+        highlightSeg, anchorIndex, activeWordIndex, selectedWordIndex, chunks,
     } = engine;
 
-    // Recompute on each edit so the top-bar always shows a fresh duration.
-    const [nowTotal, setNowTotal] = React.useState(total);
-    React.useEffect(() => { setNowTotal(total); }, [total]);
-
-    // Recomputed transcript indices — mirror what the engine computes internally.
     const selectedSeg = segments[selected] || null;
-    const highlightSeg = selectedSeg;
-    const anchorIndex = useMemo(() =>
-        selectedSeg ? words.findIndex((w) => w.e > selectedSeg.start) : -1,
-        [words, selectedSeg]
-    );
-    const activeWordIndex = useMemo(() => {
-        let lo = 0, hi = words.length - 1, best = -1;
-        while (lo <= hi) {
-            const mid = (lo + hi) >> 1;
-            if (words[mid].s <= sourceTime) { best = mid; lo = mid + 1; } else hi = mid - 1;
-        }
-        return best;
-    }, [words, sourceTime]);
-    const selectedWordIndex = useMemo(() =>
-        selectedWord ? words.findIndex((w) => w.s === selectedWord.s && w.e === selectedWord.e) : -1,
-        [words, selectedWord]
-    );
-    const chunks = useMemo(() => {
-        const out = [];
-        for (let i = 0; i < words.length; i += 50) {
-            out.push({ offset: i, items: words.slice(i, i + 50) });
-        }
-        return out;
-    }, [words]);
 
     const [activeTab, setActiveTab] = React.useState(null);
     const NAV_TARGETS = { showTranscript: 'editor-transcript', showKeyboard: 'editor-shortcuts' };
@@ -96,13 +69,36 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         else onClose();
     };
 
+    if (loadError) {
+        return (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 animate-fade" onMouseDown={onClose}>
+                <div className="card p-6 max-w-md" onMouseDown={(e) => e.stopPropagation()}>
+                    <p className="eyebrow mb-2">EDITOR · CLIP {clipIndex + 1}</p>
+                    <div className="flex items-center gap-2 text-danger text-sm"><AlertCircle size={16} /> {loadError}</div>
+                    <div className="flex gap-2 mt-5">
+                        <button className="btn-ghost" onClick={() => setReload((n) => n + 1)}>retry</button>
+                        <button className="btn-primary" onClick={onClose}>close</button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (!edl) {
+        return (
+            <div className="fixed inset-0 z-50 bg-paper flex items-center justify-center gap-3 text-muted text-sm lowercase animate-fade">
+                <Loader2 size={18} className="animate-spin text-brass" /> loading clip recipe…
+            </div>
+        );
+    }
+
     return (
         <div className="fixed inset-0 z-50 bg-paper flex flex-col animate-fade select-none">
             {/* Top bar */}
             <TopBar
                 clipIndex={clipIndex}
                 clipTitle={clipTitle}
-                total={fmt(nowTotal)}
+                total={fmt(total)}
                 fmt={fmt}
                 needsSourcePath={needsSourcePath}
                 rerenderMinutes={0}
@@ -133,6 +129,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             showSource={showSource}
                             setShowSource={setShowSource}
                             sourceRef={sourceRef}
+                            applySeek={applySeek}
+                            markHere={markHere}
                             seekSource={seekSource}
                             sourceTime={sourceTime}
                             setSourceTime={setSourceTime}
@@ -158,6 +156,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             fmt={fmt}
                             edl={edl}
                             segments={segments}
+                            maxSegments={limits.max_segments}
                             sourceTrackRef={sourceTrackRef}
                             showSourceButton={true}
                             onToggleSource={() => setShowSource(v => !v)}
@@ -179,6 +178,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             selectedWord={selectedWord}
                             selected={selected}
                             setSegment={setSegment}
+                            transcriptRef={transcriptRef}
                             fmt={fmt}
                         />
                     </div>
@@ -190,32 +190,12 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                         <OutputPreview
                             videoRef={videoRef}
                             previewUrl={previewUrl}
-                            playhead={playhead}
-                            setPlayhead={setPlayhead}
-                            renderedSegments={renderedSegments}
-                            segments={segments}
-                            coverage={coverage}
-                            clipTrackSeconds={clipTrackSeconds}
-                            onClipTimeUpdate={onClipTimeUpdate}
-                            onClipSeeked={onClipSeeked}
-                            startClipScrub={startClipScrub}
-                            dispatch={dispatch}
-                            startTrimDrag={startTrimDrag}
                             fmt={fmt}
-                            total={fmt(nowTotal)}
                             dirty={dirty}
                             missingSeconds={missingSeconds}
                             rendering={rendering}
-                            canRender={canRender}
-                            doRender={doRender}
-                            selected={selected}
-                            showEffects={showEffects}
-                            setShowEffects={setShowEffects}
-                            renderError={renderError}
-                            overCaps={overCaps}
-                            needsSourcePath={needsSourcePath}
-                            renderSeconds={renderSeconds}
-                            limits={limits}
+                            onClipTimeUpdate={onClipTimeUpdate}
+                            onClipSeeked={onClipSeeked}
                             onClipPlay={onClipPlay}
                             onStopPlayback={onStopPlayback}
                         />
@@ -251,11 +231,12 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             overCaps={overCaps}
                             fmt={fmt}
                             minSeg={minSeg}
-                            total={fmt(nowTotal)}
+                            total={fmt(total)}
                             dirty={dirty}
                             showEffects={showEffects}
                             setShowEffects={setShowEffects}
                             limits={limits}
+                            onClose={handleClose}
                         />
                     </div>
                 </div>

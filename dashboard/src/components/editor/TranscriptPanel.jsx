@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Word-level transcript slice component (memoized for performance).
@@ -43,7 +43,9 @@ function fmt(t) {
 
 const CHUNK_WORDS = 50;
 
-export default function TranscriptPanel({
+// Memoized: playback updates the playhead every frame, and the transcript
+// (thousands of words on long sources) doesn't depend on it.
+export default React.memo(function TranscriptPanel({
     words, chunks, activeWordIndex, selectedWordIndex, anchorIndex,
     selectedSeg, highlightSeg,
     pickWord, scrollTranscriptTo,
@@ -52,18 +54,10 @@ export default function TranscriptPanel({
     selectedWord,
     selected,
     setSegment,
+    transcriptRef,
     fmt,
 }) {
     if (!words.length) return null;
-
-    // Build chunks for virtualization
-    const memoChunks = useMemo(() => {
-        const out = [];
-        for (let i = 0; i < words.length; i += CHUNK_WORDS) {
-            out.push({ offset: i, items: words.slice(i, i + CHUNK_WORDS) });
-        }
-        return out;
-    }, [words]);
 
     return (
         <div id="editor-transcript" className="flex flex-col min-h-0 flex-1">
@@ -130,9 +124,10 @@ export default function TranscriptPanel({
 
             {/* Scrollable word chips */}
             <div
-                className="flex-1 min-h-0 flex-wrap content-start gap-x-1 gap-y-1.5 overflow-y-auto custom-scrollbar pr-1"
+                ref={transcriptRef}
+                className="relative flex-1 min-h-0 flex flex-wrap content-start gap-x-1 gap-y-1.5 overflow-y-auto custom-scrollbar pr-1"
             >
-                {memoChunks.map((c) => {
+                {chunks.map((c) => {
                     const first = c.items[0].s;
                     const last = c.items[c.items.length - 1].e;
                     let lit = 'none';
@@ -159,4 +154,4 @@ export default function TranscriptPanel({
             </div>
         </div>
     );
-}
+});

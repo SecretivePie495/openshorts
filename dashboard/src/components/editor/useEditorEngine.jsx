@@ -129,6 +129,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     // ---- load EDL ---------------------------------------------------------
     useEffect(() => {
         let cancelled = false;
+        setLoadError(null);
         (async () => {
             try {
                 const data = await apiJson(`/api/clip/${jobId}/${clipIndex}/edl`);
@@ -154,10 +155,11 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     const minSeg = limits.min_segment_seconds || MIN_SEGMENT_SECONDS;
     const total = totalOf(segments);
     const sourceOpen = sourceAvailable && showSource;
-    const bounds = useMemo(
-        () => ({ lo: canonical.start, hi: canonical.end }),
-        [canonical]
-    );
+    // Trim bounds: with the source gone, cuts must stay inside the range the
+    // canonical file was rendered from.
+    const bounds = useMemo(() => (sourceAvailable
+        ? { lo: 0, hi: sourceDuration || Infinity }
+        : { lo: canonical.start, hi: canonical.end }), [sourceAvailable, sourceDuration, canonical]);
 
     const dirty = useMemo(() => {
         if (!renderedSegments) return false;
@@ -172,12 +174,13 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     const needsSourcePath = framing !== 'auto'
         || segments.some((s) => s.start < canonical.start - 0.05 || s.end > canonical.end + 0.05);
     const invalidSegments = segments.some(outOfRange);
-    const overCaps = segments.length >= limits.max_segments || total > limits.max_total_seconds;
+    const overCaps = segments.length > limits.max_segments || total > limits.max_total_seconds;
     const canRender = !rendering
         && segments.length > 0
         && segments.every((s) => s.end - s.start >= minSeg)
         && !invalidSegments
-        && !overCaps;
+        && !overCaps
+        && (framing === 'auto' || sourceAvailable);
 
     // ---- word snap ---------------------------------------------------------
     const snapEdge = useCallback((t, kind) => {
@@ -195,7 +198,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
         end: Math.min(bounds.hi, Math.max(seg.end, seg.start + minSeg)),
     }), [bounds.lo, bounds.hi, minSeg]);
 
-    const setSegment = (index, next, { snap = true } = {}) => {
+    const setSegment = useCallback((index, next, { snap = true } = {}) => {
         if (renderingRef.current) return;
         const updated = segments.map((s, i) => {
             if (i !== index) return s;
@@ -207,7 +210,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
             return clampSeg(seg);
         });
         dispatch({ type: 'commit', segments: updated, select: index });
-    };
+    }, [segments, snapEdge, clampSeg]);
 
     const addSegment = () => {
         if (renderingRef.current) return;
@@ -547,12 +550,23 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     const stepPlayback = useCallback((v) => {
         if (dragRef.current?.kind === 'scrub') return;
         if (!dirty) { setPlayhead(v.currentTime); return; }
+        // A seek fires timeupdate before seeked; onClipSeeked maps it, so don't
+        // mistake the jump for playback crossing a span edge.
+        if (v.seeking) return;
 
         let i = playSpanRef.current;
         let sp = coverage[i];
         if (!sp) return;
 
         const spEnd = sp.rendered !== null ? sp.rendered + (sp.end - sp.start) : null;
+        // Outside this span's rendered range = a seek (Chrome clears v.seeking
+        // before that timeupdate), not playback crossing the edge: re-resolve.
+        // ponytail: 0.3s covers one timeupdate interval of natural overshoot.
+        if (spEnd !== null && (v.currentTime < sp.rendered - COVERAGE_EPSILON || v.currentTime > spEnd + 0.3)) {
+            const t = renderedToClip(v.currentTime);
+            if (t !== null) { playSpanRef.current = spanIndexAt(t); setPlayhead(t); }
+            return;
+        }
         if (spEnd !== null && v.currentTime < spEnd - COVERAGE_EPSILON) {
             setPlayhead(sp.start + (v.currentTime - sp.rendered));
             return;
@@ -570,7 +584,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
         playSpanRef.current = i;
         setPlayhead(next.start);
         try { v.currentTime = next.rendered; } catch { /* not seekable yet */ }
-    }, [coverage, dirty, segments]);
+    }, [coverage, dirty, segments, renderedToClip, spanIndexAt]);
 
     const playRafRef = useRef(0);
     const stopPlayLoop = useCallback(() => {
@@ -603,9 +617,12 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     }, [coverage, dirty, startPlayLoop, renderedToClip, spanIndexAt]);
 
     const onClipPlay = useCallback((e) => {
-        const v = e.target;
-        if (dirty) startPlayLoop();
-    }, [dirty, startPlayLoop]);
+        if (dirty) {
+            const sp = coverage[playSpanRef.current];
+            if (sp && sp.rendered === null) { e.target.pause(); return; }
+        }
+        startPlayLoop();
+    }, [coverage, dirty, startPlayLoop]);
 
     // ---- scrubbing clip track ---------------------------------------------
     const onScrubMove = useCallback((e) => {
@@ -689,9 +706,14 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
     // ---- keyboard ---------------------------------------------------------
     useEffect(() => {
         const onKey = (e) => {
-            const tag = e.target?.tagName;
-            const typing = tag === 'INPUT' || tag === 'textarea' || tag === 'select';
-            if (typing) return;
+            const tag = (e.target?.tagName || '').toLowerCase();
+            const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
+            // The effects overlay is modal: Esc closes it, other shortcuts
+            // must not edit the timeline hidden behind it.
+            if (showEffects) {
+                if (e.key === 'Escape') { e.preventDefault(); setShowEffects(false); }
+                return;
+            }
             if (e.key === 'Escape') {
                 e.preventDefault();
                 if (rendering) onClose();
@@ -699,6 +721,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
                 else onClose();
                 return;
             }
+            if (typing) return;
             if (confirmClose) return;
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
                 e.preventDefault();
@@ -738,7 +761,7 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [segments, selected, sourceOpen, confirmClose, rendering, dirty, onClose]);
+    });
 
     // ---- re-render ---------------------------------------------------------
     useEffect(() => {
@@ -885,10 +908,11 @@ export default function useEditorEngine({ jobId, clipIndex, onClose, onRerendere
         invalidSegments, overCaps, canRender,
         missingSeconds, coverage, clipTrackSeconds,
         markRange, playSpanRef,
+        highlightSeg, anchorIndex, activeWordIndex, selectedWordIndex, chunks,
         // actions
         setSegment, addSegment, deleteSegment, moveSegment, splitSegment,
         startTrimDrag, startGhostDrag,
-        seekSource, doRender,
+        seekSource, applySeek, doRender,
         markHere, clearMarks, sendToClip,
         scrollTranscriptTo, pickWord,
         onClipTimeUpdate, onClipSeeked, startClipScrub,
