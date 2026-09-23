@@ -80,6 +80,15 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         return out;
     }, [words]);
 
+    const [activeTab, setActiveTab] = React.useState(null);
+    const NAV_TARGETS = { showTranscript: 'editor-transcript', showKeyboard: 'editor-shortcuts' };
+    const onNavAction = (action, id) => {
+        setActiveTab(id);
+        if (action === 'openEffects') { setShowEffects(true); return; }
+        const target = NAV_TARGETS[action] || (id === 'framing' || id === 'captions' ? 'editor-framing' : null);
+        document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
     const handleClose = () => {
         if (rendering) onClose();
         else if (dirty) setConfirmClose(true);
@@ -101,7 +110,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 confirmClose={confirmClose}
                 rendering={rendering}
                 onToggleSource={() => setShowSource(v => !v)}
-                onConfirmClose={() => { setConfirmClose(false); }}
+                onConfirmClose={(discard = true) => { setConfirmClose(false); if (discard !== false) onClose(); }}
                 onClose={handleClose}
             />
 
@@ -110,13 +119,14 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
 
                 {/* Left nav toolbar */}
                 <LeftNav
-                    activeTab={null}
+                    activeTab={activeTab}
+                    onAction={onNavAction}
                     showSource={showSource}
                     setShowSource={setShowSource}
                 />
 
                 {/* Column 1: Source monitor + Transcript */}
-                <div className={`${sourceOpen ? 'w-[24rem] xl:w-[26rem] shrink-0' : 'flex-1 min-w-0'} flex flex-col min-h-0 border-r border-rule`}>
+                <div className={`${sourceOpen ? 'w-[20rem] lg:w-[24rem] xl:w-[26rem] shrink-0' : 'w-[20rem] lg:w-[24rem] shrink-0'} flex flex-col min-h-0 border-r border-rule`}>
                     <div className="flex-1 min-h-0 p-4 overflow-y-auto custom-scrollbar">
                         <SourceMonitor
                             showSource={showSource}
@@ -174,7 +184,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 </div>
 
                 {/* Column 2: Program preview (center stage) */}
-                <div className={`flex flex-col min-h-0 ${sourceOpen ? 'xl:flex-1 xl:min-w-0' : 'flex-1'}`}>
+                <div className="flex-1 min-w-0 flex flex-col min-h-0">
                     <div className="flex-1 min-h-0 p-4 overflow-y-auto">
                         <OutputPreview
                             videoRef={videoRef}
@@ -213,8 +223,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 </div>
 
                 {/* Column 3: Inspector (segments / framing / toggles) */}
-                <div className="w-full xl:w-[22rem] 2xl:w-[26rem] shrink-0 flex flex-col min-h-0 border-l border-rule bg-paper">
-                    <div className="flex-1 xl:overflow-y-auto custom-scrollbar pr-1">
+                <div className="w-[20rem] xl:w-[22rem] 2xl:w-[26rem] shrink-0 flex flex-col min-h-0 border-l border-rule bg-paper">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
                         <Inspector
                             segments={segments}
                             selected={selected}

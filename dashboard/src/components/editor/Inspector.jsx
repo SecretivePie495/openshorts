@@ -20,7 +20,7 @@ export default function Inspector({
             <div className="flex-1 xl:overflow-y-auto custom-scrollbar pr-1 space-y-5">
 
                 {/* Segments */}
-                <div>
+                <div id="editor-segments" className="scroll-mt-4">
                     <div className="flex items-center justify-between mb-2">
                         <p className="eyebrow">Segments · {segments.length}/{limits?.max_segments}</p>
                         <div className="flex items-center gap-1">
@@ -135,7 +135,7 @@ export default function Inspector({
                 </div>
 
                 {/* Framing */}
-                <div>
+                <div id="editor-framing" className="scroll-mt-4">
                     <p className="eyebrow mb-2">Framing</p>
                     <div className="grid grid-cols-3 gap-1.5">
                         {[
@@ -204,7 +204,7 @@ export default function Inspector({
                 </div>
 
                 {/* Keyboard legend */}
-                <div>
+                <div id="editor-shortcuts" className="scroll-mt-4">
                     <p className="eyebrow mb-2">Shortcuts</p>
                     <p className="readout leading-relaxed">
                         SPACE PLAY · S SPLIT · ⌫ DELETE · ⌘Z UNDO · ←/→ NUDGE EDGE
