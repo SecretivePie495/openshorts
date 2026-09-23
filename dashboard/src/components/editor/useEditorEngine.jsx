@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useReducer, useRef, useCallback, useMemo, useDeferredValue } from 'react';
-import { getApiUrl } from '../config';
-import { apiFetch, apiJson, QuotaError } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
+import { getApiUrl } from '../../config';
+import { apiFetch, apiJson, QuotaError } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 const MIN_SEGMENT_SECONDS = 0.5;
 const SNAP_WINDOW_SECONDS = 0.35;
